@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -55,9 +55,67 @@ jobs:
           "$CLI" self-test --evidence build/nozzle-tester-self-test.json
           python scripts/validate-evidence.py build/nozzle-tester-self-test.json
 
+      - name: Stage release package
+        shell: bash
+        run: |
+          package="nozzle-tester-${{ runner.os }}"
+          mkdir -p "$package"
+          if [ -x build/nozzle-tester-cli ]; then
+            cp build/nozzle-tester-cli "$package/"
+            cp build/nozzle-tester "$package/"
+          else
+            cp build/Release/nozzle-tester-cli.exe "$package/"
+            cp build/Release/nozzle-tester.exe "$package/"
+          fi
+          cp build/nozzle-tester-self-test.json "$package/"
+          cp README.md "$package/"
+          cp -R docs "$package/docs"
+          cmake -E tar cf "${package}.zip" --format=zip "$package"
+
+      - name: Upload release package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nozzle-tester-package-${{ runner.os }}
+          path: nozzle-tester-${{ runner.os }}.zip
+          if-no-files-found: error
+
       - name: Upload evidence fixture
         uses: actions/upload-artifact@v4
         with:
           name: nozzle-tester-self-test-${{ matrix.os }}
           path: build/nozzle-tester-self-test.json
           if-no-files-found: error
+
+  latest-release:
+    name: Publish latest release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Move latest tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f latest "$GITHUB_SHA"
+          git push origin refs/tags/latest --force
+
+      - name: Download release packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: nozzle-tester-package-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit latest --repo "$GITHUB_REPOSITORY" --title "latest" --notes "Moving latest build from main." --latest
+          else
+            gh release create latest --repo "$GITHUB_REPOSITORY" --verify-tag --title "latest" --notes "Moving latest build from main." --latest
+          fi
+          gh release upload latest dist/nozzle-tester-*.zip --repo "$GITHUB_REPOSITORY" --clobber
