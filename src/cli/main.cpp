@@ -29,6 +29,7 @@ struct cli_options {
     uint32_t frames{2};
     uint32_t timeout_ms{2000};
     uint32_t delay_ms{16};
+    uint32_t hold_ms{0};
 };
 
 void print_usage(const char *program) {
@@ -38,7 +39,7 @@ void print_usage(const char *program) {
     std::fprintf(stderr, "  --frame N / --expected-frame N\n");
     std::fprintf(stderr, "  --output PATH --input PATH --evidence PATH\n");
     std::fprintf(stderr, "Sender/receiver options:\n");
-    std::fprintf(stderr, "  --name NAME --frames N --timeout-ms N --delay-ms N\n");
+    std::fprintf(stderr, "  --name NAME --frames N --timeout-ms N --delay-ms N --hold-ms N\n");
     std::fprintf(stderr, "Discovery options:\n");
     std::fprintf(stderr, "  discover [--name NAME] [--timeout-ms N]\n");
 }
@@ -132,6 +133,9 @@ bool parse_options(int argc, char **argv, cli_options &options) {
         } else if(std::strcmp(arg, "--delay-ms") == 0) {
             const char *value = require_value(arg);
             if(value == nullptr || !parse_u32(value, options.delay_ms)) return false;
+        } else if(std::strcmp(arg, "--hold-ms") == 0) {
+            const char *value = require_value(arg);
+            if(value == nullptr || !parse_u32(value, options.hold_ms)) return false;
         } else if(std::strcmp(arg, "--input") == 0) {
             const char *value = require_value(arg);
             if(value == nullptr) return false;
@@ -365,11 +369,13 @@ int run_sender(const cli_options &options) {
     }
 
     uint32_t published = 0;
+    std::string publish_failure_reason;
     for(uint32_t frame = 0; frame < options.frames; frame++) {
         NozzleFrame *writable = nullptr;
         error = nozzle_sender_acquire_writable_frame(sender, options.width, options.height, to_nozzle_format(options.format), &writable);
         if(error != NOZZLE_OK || writable == nullptr) {
             std::fprintf(stderr, "acquire_writable_frame_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
+            publish_failure_reason = std::string("acquire_writable_frame_failed:") + nozzle_error_name(error);
             break;
         }
 
@@ -378,6 +384,7 @@ int run_sender(const cli_options &options) {
         error = nozzle_frame_lock_writable_pixels_mapping_with_origin(writable, NOZZLE_ORIGIN_TOP_LEFT, &mapping, &pixels);
         if(error != NOZZLE_OK || mapping == nullptr || pixels.data == nullptr) {
             std::fprintf(stderr, "writable_mapping_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
+            publish_failure_reason = std::string("writable_mapping_failed:") + nozzle_error_name(error);
             nozzle_sender_discard_frame(sender, writable);
             nozzle_frame_release(writable);
             break;
@@ -397,6 +404,7 @@ int run_sender(const cli_options &options) {
         nozzle_frame_release(writable);
         if(error != NOZZLE_OK) {
             std::fprintf(stderr, "commit_frame_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
+            publish_failure_reason = std::string("commit_frame_failed:") + nozzle_error_name(error);
             break;
         }
         published += 1;
@@ -405,13 +413,17 @@ int run_sender(const cli_options &options) {
         }
     }
 
+    if(0 < options.hold_ms) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(options.hold_ms));
+    }
+
     nozzle_sender_destroy(sender);
     record.observed_frame_count = published;
     record.observed_frame_index = published == 0 ? 0 : published - 1u;
     record.changed_across_observations = 1 < published;
     record.verification.result = published == options.frames ? nozzle_tester::verdict::pass : nozzle_tester::verdict::fail;
     if(record.verification.result != nozzle_tester::verdict::pass) {
-        record.verification.failure_reasons.push_back("publish_frame_failed");
+        record.verification.failure_reasons.push_back(publish_failure_reason.empty() ? "publish_frame_failed" : publish_failure_reason);
     }
     record.verification.dimensions_ok = true;
     record.verification.orientation_ok = true;

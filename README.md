@@ -54,6 +54,12 @@ Start a CPU writable-frame sender path:
 build/nozzle-tester-cli sender --name nozzle_tester --width 320 --height 240 --format rgba8_unorm --frames 60 --evidence build/sender.json
 ```
 
+Hold a registered sender open without publishing frames. This isolates process-level sender discovery from frame allocation/upload failures:
+
+```bash
+build/nozzle-tester-cli sender --name nozzle_tester_discovery --width 320 --height 240 --format rgba8_unorm --frames 0 --hold-ms 5000
+```
+
 List currently discoverable senders, or wait for a named sender:
 
 ```bash
