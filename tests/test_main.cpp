@@ -108,6 +108,34 @@ void test_byte_size_validation() {
     check(has_reason(wrong_bpp_result, "byte_size_mismatch"), "wrong bytes-per-pixel reports byte_size_mismatch");
 }
 
+
+void test_dimension_and_format_mismatch_reasons() {
+    nozzle_tester::test_case expected{};
+    expected.id = "unit-mismatch-reasons";
+    expected.width = 320;
+    expected.height = 240;
+    expected.format = nozzle_tester::tester_format::rgba16_float;
+    expected.frame_index = 1;
+
+    nozzle_tester::image_buffer image = nozzle_tester::generate_pattern(expected);
+    image.format = nozzle_tester::tester_format::rgba8_unorm;
+    const nozzle_tester::verify_result format_result = nozzle_tester::verify_pattern(image, expected);
+    check(format_result.result == nozzle_tester::verdict::fail, "format mismatch fails deterministically");
+    check(format_result.dimensions_ok, "format mismatch does not poison dimension check");
+    check(!format_result.format_ok, "format mismatch exposes format check");
+    check(has_reason(format_result, "format_mismatch"), "format mismatch reports format_mismatch");
+    check(!has_reason(format_result, "dimension_mismatch"), "format mismatch is not reported as dimension_mismatch");
+
+    nozzle_tester::image_buffer wrong_dimensions = nozzle_tester::generate_pattern(expected);
+    wrong_dimensions.width = expected.width + 1u;
+    const nozzle_tester::verify_result dimension_result = nozzle_tester::verify_pattern(wrong_dimensions, expected);
+    check(dimension_result.result == nozzle_tester::verdict::fail, "dimension mismatch fails deterministically");
+    check(!dimension_result.dimensions_ok, "dimension mismatch exposes dimension check");
+    check(dimension_result.format_ok, "dimension mismatch does not poison format check");
+    check(has_reason(dimension_result, "dimension_mismatch"), "dimension mismatch reports dimension_mismatch");
+    check(!has_reason(dimension_result, "format_mismatch"), "dimension mismatch is not reported as format_mismatch");
+}
+
 void test_non_zero_frame_index_oracle() {
     nozzle_tester::test_case test{};
     test.id = "unit-frame-index";
@@ -149,6 +177,7 @@ void test_evidence_json() {
     check(json.find("\"format\": \"rgba8_unorm\"") != std::string::npos, "evidence has format");
     check(json.find("\"repo_sha\": \"unknown\"") == std::string::npos, "evidence has build repo sha");
     check(json.find("\"nozzle_core_sha\": \"unknown\"") == std::string::npos, "evidence has nozzle core sha");
+    check(json.find("\"format\": \"PASS\"") != std::string::npos, "evidence has format check");
     check(json.find("\"artifacts\"") != std::string::npos, "evidence has artifact roles");
     check(json.find("\"covered_failure_reasons\"") != std::string::npos, "evidence has covered failure reasons");
 }
@@ -159,6 +188,7 @@ int main() {
     test_good_patterns();
     test_bad_fixtures();
     test_byte_size_validation();
+    test_dimension_and_format_mismatch_reasons();
     test_non_zero_frame_index_oracle();
     test_evidence_json();
     if(failures != 0) {

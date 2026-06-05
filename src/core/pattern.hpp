@@ -50,6 +50,7 @@ struct verify_result {
     uint64_t rb_swapped_mismatch_count{0};
     uint64_t stale_previous_mismatch_count{0};
     bool dimensions_ok{false};
+    bool format_ok{false};
     bool orientation_ok{false};
     bool channel_order_ok{false};
     bool alpha_ok{false};

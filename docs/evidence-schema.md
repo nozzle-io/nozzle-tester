@@ -27,11 +27,12 @@ Top-level fields:
     "channel_order": "PASS|FAIL|INCONCLUSIVE",
     "alpha": "PASS|FAIL|INCONCLUSIVE",
     "dimensions": "PASS|FAIL|INCONCLUSIVE",
+    "format": "PASS|FAIL|INCONCLUSIVE",
     "stale_frame": "PASS|FAIL|INCONCLUSIVE",
     "stride_or_stretch": "PASS|FAIL|INCONCLUSIVE"
   },
   "verdict": "PASS|FAIL|SKIP|INCONCLUSIVE",
-  "failure_reasons": ["vertical_flip", "rb_swap", "alpha_mismatch", "stale_frame", "dimension_mismatch", "byte_size_mismatch", "pixel_mismatch", "timeout", "missing_frame"],
+  "failure_reasons": ["vertical_flip", "rb_swap", "alpha_mismatch", "stale_frame", "dimension_mismatch", "format_mismatch", "byte_size_mismatch", "pixel_mismatch", "timeout", "missing_frame"],
   "covered_failure_reasons": ["vertical_flip", "rb_swap", "alpha_mismatch", "stale_frame"],
   "artifacts": [
     { "role": "raw_capture", "path": "capture.raw" },
@@ -44,3 +45,15 @@ Top-level fields:
 A missing field must not be silently interpreted as PASS. If a backend cannot expose native format, synchronization, or transfer path, the evidence must say `unknown` or mark the row `INCONCLUSIVE`.
 
 GUI capture must verify the raw observed payload with the oracle during capture. Preview artifacts are for humans only and must not replace raw evidence.
+
+## Build metadata
+
+CI evidence must include concrete `repo_sha` and `nozzle_core_sha` values. Git worktree builds auto-detect those values. Source-archive or vendored builds without `.git` must pass them explicitly at configure time, for example:
+
+```bash
+cmake -S . -B build \
+  -DNOZZLE_TESTER_GIT_SHA=<nozzle-tester-sha> \
+  -DNOZZLE_TESTER_NOZZLE_CORE_SHA=<deps-nozzle-sha>
+```
+
+`unknown` is allowed in the schema only to make local ad-hoc builds explicit. `scripts/validate-evidence.py` intentionally rejects `unknown` because issue evidence without source identity is not useful.

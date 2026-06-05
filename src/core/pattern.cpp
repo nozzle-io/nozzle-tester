@@ -333,10 +333,16 @@ std::vector<uint8_t> image_to_rgba8_preview(const image_buffer &image) {
 
 verify_result verify_pattern(const image_buffer &observed, const test_case &expected) {
     verify_result result{};
-    result.dimensions_ok = observed.width == expected.width && observed.height == expected.height && observed.format == expected.format;
-    if(!result.dimensions_ok) {
+    result.dimensions_ok = observed.width == expected.width && observed.height == expected.height;
+    result.format_ok = observed.format == expected.format;
+    if(!result.dimensions_ok || !result.format_ok) {
         result.result = verdict::fail;
-        result.failure_reasons.push_back("dimension_mismatch");
+        if(!result.dimensions_ok) {
+            result.failure_reasons.push_back("dimension_mismatch");
+        }
+        if(!result.format_ok) {
+            result.failure_reasons.push_back("format_mismatch");
+        }
         return result;
     }
 

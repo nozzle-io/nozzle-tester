@@ -535,7 +535,7 @@ int main() {
         if(!state.last_error.empty()) {
             ImGui::Text("last error: %s", state.last_error.c_str());
         }
-        ImGui::TextWrapped("The GUI uses the same pattern/oracle as nozzle-tester-cli. Capture evidence writes JSON plus an RGBA captured-frame artifact; a screenshot alone is not the oracle.");
+        ImGui::TextWrapped("The GUI uses the same pattern/oracle as nozzle-tester-cli. Capture evidence writes JSON plus raw and RGBA-preview artifacts; a screenshot alone is not the oracle.");
         const float max_width = 760.0f;
         const float scale = state.texture_width > 0 ? std::min(max_width / (float)state.texture_width, 1.0f) : 1.0f;
         ImGui::Image((ImTextureID)(intptr_t)state.texture, ImVec2((float)state.texture_width * scale, (float)state.texture_height * scale));

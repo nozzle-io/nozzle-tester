@@ -112,6 +112,7 @@ std::string make_evidence_json(const evidence_record &record) {
     stream << "    \"channel_order\": \"" << check_text(record.verification.channel_order_ok) << "\",\n";
     stream << "    \"alpha\": \"" << check_text(record.verification.alpha_ok) << "\",\n";
     stream << "    \"dimensions\": \"" << check_text(record.verification.dimensions_ok) << "\",\n";
+    stream << "    \"format\": \"" << check_text(record.verification.format_ok) << "\",\n";
     stream << "    \"stale_frame\": \"" << check_text(record.verification.stale_frame_ok) << "\",\n";
     stream << "    \"stride_or_stretch\": \"" << (record.verification.result == verdict::pass ? "PASS" : "INCONCLUSIVE") << "\"\n";
     stream << "  },\n";

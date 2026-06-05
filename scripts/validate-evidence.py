@@ -31,6 +31,7 @@ REQUIRED_CHECKS = [
     "channel_order",
     "alpha",
     "dimensions",
+    "format",
     "stale_frame",
     "stride_or_stretch",
 ]

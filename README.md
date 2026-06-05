@@ -96,6 +96,19 @@ The GUI provides:
 
 The GUI is intentionally functional rather than polished. It must not be used as a screenshot-only oracle: report the exported JSON, raw captured payload, and optional preview artifact.
 
+
+## Source archive / vendored builds
+
+Evidence used in issues must identify both the tester source and the embedded nozzle core revision. Normal git checkouts auto-detect these values. If building from a source archive or another layout without `.git`, pass them explicitly:
+
+```bash
+cmake -S . -B build \
+  -DNOZZLE_TESTER_GIT_SHA=<nozzle-tester-sha> \
+  -DNOZZLE_TESTER_NOZZLE_CORE_SHA=<deps-nozzle-sha>
+```
+
+The evidence schema can represent `unknown`, but `scripts/validate-evidence.py` rejects it by design. Do not paste `unknown`-SHA evidence into nozzle-dev issues.
+
 ## Evidence boundary
 
 A `PASS` JSON result from this tool is evidence for the specific tested input/capture. It is not a blanket support claim for a binding, host app, backend, or platform.
