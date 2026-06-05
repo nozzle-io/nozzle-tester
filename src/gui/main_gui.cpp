@@ -72,6 +72,29 @@ const char *mode_role_names[] = {
     "loopback-receiver",
 };
 
+const char *nozzle_error_name(NozzleErrorCode error) {
+    switch(error) {
+        case NOZZLE_OK: return "NOZZLE_OK";
+        case NOZZLE_ERROR_UNKNOWN: return "NOZZLE_ERROR_UNKNOWN";
+        case NOZZLE_ERROR_INVALID_ARGUMENT: return "NOZZLE_ERROR_INVALID_ARGUMENT";
+        case NOZZLE_ERROR_UNSUPPORTED_BACKEND: return "NOZZLE_ERROR_UNSUPPORTED_BACKEND";
+        case NOZZLE_ERROR_UNSUPPORTED_FORMAT: return "NOZZLE_ERROR_UNSUPPORTED_FORMAT";
+        case NOZZLE_ERROR_DEVICE_MISMATCH: return "NOZZLE_ERROR_DEVICE_MISMATCH";
+        case NOZZLE_ERROR_RESOURCE_CREATION_FAILED: return "NOZZLE_ERROR_RESOURCE_CREATION_FAILED";
+        case NOZZLE_ERROR_SHARED_HANDLE_FAILED: return "NOZZLE_ERROR_SHARED_HANDLE_FAILED";
+        case NOZZLE_ERROR_SENDER_NOT_FOUND: return "NOZZLE_ERROR_SENDER_NOT_FOUND";
+        case NOZZLE_ERROR_SENDER_CLOSED: return "NOZZLE_ERROR_SENDER_CLOSED";
+        case NOZZLE_ERROR_TIMEOUT: return "NOZZLE_ERROR_TIMEOUT";
+        case NOZZLE_ERROR_BACKEND_ERROR: return "NOZZLE_ERROR_BACKEND_ERROR";
+        case NOZZLE_ERROR_COMMAND_FAILED: return "NOZZLE_ERROR_COMMAND_FAILED";
+        default: return "NOZZLE_ERROR_UNRECOGNIZED";
+    }
+}
+
+std::string error_text(const char *operation, NozzleErrorCode error) {
+    return std::string(operation) + ": " + nozzle_error_name(error) + " (" + std::to_string((int)error) + ")";
+}
+
 void glfw_error_callback(int error, const char *description) {
     std::fprintf(stderr, "GLFW error %d: %s\n", error, description != nullptr ? description : "unknown");
 }
@@ -189,7 +212,7 @@ bool start_runtime(gui_state &state) {
         sender_desc.ring_buffer_size = 3;
         NozzleErrorCode error = nozzle_sender_create(&sender_desc, &state.sender);
         if(error != NOZZLE_OK || state.sender == nullptr) {
-            state.last_error = "sender_create_failed";
+            state.last_error = error_text("sender_create_failed", error);
             destroy_runtime(state);
             return false;
         }
@@ -201,7 +224,7 @@ bool start_runtime(gui_state &state) {
         receiver_desc.receive_mode = NOZZLE_RECEIVE_SEQUENTIAL_BEST_EFFORT;
         NozzleErrorCode error = nozzle_receiver_create(&receiver_desc, &state.receiver);
         if(error != NOZZLE_OK || state.receiver == nullptr) {
-            state.last_error = "receiver_create_failed";
+            state.last_error = error_text("receiver_create_failed", error);
             destroy_runtime(state);
             return false;
         }
@@ -220,7 +243,7 @@ bool publish_one_frame(gui_state &state) {
     NozzleFrame *writable = nullptr;
     NozzleErrorCode error = nozzle_sender_acquire_writable_frame(state.sender, test.width, test.height, to_nozzle_format(test.format), &writable);
     if(error != NOZZLE_OK || writable == nullptr) {
-        state.last_error = "acquire_writable_frame_failed";
+        state.last_error = error_text("acquire_writable_frame_failed", error);
         return false;
     }
 
@@ -231,7 +254,9 @@ bool publish_one_frame(gui_state &state) {
         if(mapping != nullptr) nozzle_pixel_mapping_unlock(&mapping);
         nozzle_sender_discard_frame(state.sender, writable);
         nozzle_frame_release(writable);
-        state.last_error = "writable_mapping_failed";
+        state.last_error = error == NOZZLE_OK
+            ? "writable_mapping_failed: invalid mapped pixels"
+            : error_text("writable_mapping_failed", error);
         return false;
     }
 
@@ -243,7 +268,7 @@ bool publish_one_frame(gui_state &state) {
     error = nozzle_sender_commit_frame(state.sender, writable);
     nozzle_frame_release(writable);
     if(error != NOZZLE_OK) {
-        state.last_error = "commit_frame_failed";
+        state.last_error = error_text("commit_frame_failed", error);
         return false;
     }
     state.last_error.clear();
@@ -280,7 +305,7 @@ bool receive_one_frame(gui_state &state) {
     NozzleFrame *frame = nullptr;
     NozzleErrorCode error = nozzle_receiver_acquire_frame(state.receiver, &acquire_desc, &frame);
     if(error != NOZZLE_OK || frame == nullptr) {
-        state.last_error = "missing_frame";
+        state.last_error = error_text("missing_frame", error);
         return false;
     }
 
@@ -288,7 +313,7 @@ bool receive_one_frame(gui_state &state) {
     error = nozzle_frame_get_info(frame, &info);
     if(error != NOZZLE_OK) {
         nozzle_frame_release(frame);
-        state.last_error = "frame_info_failed";
+        state.last_error = error_text("frame_info_failed", error);
         return false;
     }
 
@@ -305,7 +330,7 @@ bool receive_one_frame(gui_state &state) {
     error = nozzle_frame_copy_pixels_with_origin(frame, NOZZLE_ORIGIN_TOP_LEFT, copied.data(), copied.size(), &copied_pixels);
     nozzle_frame_release(frame);
     if(error != NOZZLE_OK) {
-        state.last_error = "copy_pixels_failed";
+        state.last_error = error_text("copy_pixels_failed", error);
         return false;
     }
     state.last_error.clear();

@@ -94,7 +94,18 @@ if(NOZZLE_TESTER_BUILD_GUI)
         target_link_libraries(nozzle_tester_imgui PUBLIC OpenGL::GL)
     endif()
 
-    add_executable(nozzle-tester src/gui/main_gui.cpp)
+    if(APPLE)
+        add_executable(nozzle-tester MACOSX_BUNDLE src/gui/main_gui.cpp)
+        set_target_properties(nozzle-tester PROPERTIES
+            MACOSX_BUNDLE_BUNDLE_NAME "nozzle-tester"
+            MACOSX_BUNDLE_GUI_IDENTIFIER "org.nozzle-io.tester"
+            MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+            MACOSX_BUNDLE_COPYRIGHT "Copyright nozzle contributors"
+        )
+    else()
+        add_executable(nozzle-tester src/gui/main_gui.cpp)
+    endif()
     target_link_libraries(nozzle-tester PRIVATE nozzle_tester_core nozzle_tester_imgui nozzle)
     target_compile_options(nozzle-tester PRIVATE
         $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wall -Wextra -Wpedantic>
@@ -105,8 +116,15 @@ endif()
 
 if(NOZZLE_TESTER_BUILD_TESTS)
     include(CTest)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
     add_executable(nozzle_tester_tests tests/test_main.cpp)
     target_link_libraries(nozzle_tester_tests PRIVATE nozzle_tester_core)
     add_test(NAME nozzle_tester_unit COMMAND nozzle_tester_tests)
     add_test(NAME nozzle_tester_cli_self_test COMMAND nozzle-tester-cli self-test --evidence nozzle-tester-self-test.json)
+    add_test(
+        NAME nozzle_tester_cli_discovery_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/discovery_smoke.py
+            --cli $<TARGET_FILE:nozzle-tester-cli>
+    )
+    set_tests_properties(nozzle_tester_cli_discovery_smoke PROPERTIES SKIP_RETURN_CODE 77)
 endif()

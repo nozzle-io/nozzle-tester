@@ -55,12 +55,14 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          for binary in build/nozzle-tester build/nozzle-tester-cli; do
+          for binary in build/nozzle-tester.app/Contents/MacOS/nozzle-tester build/nozzle-tester-cli; do
             archs=$(lipo -archs "$binary")
             echo "$binary: $archs"
             echo "$archs" | grep -q "arm64" || { echo "Missing arm64 slice in $binary"; exit 1; }
             echo "$archs" | grep -q "x86_64" || { echo "Missing x86_64 slice in $binary"; exit 1; }
           done
+          test -f build/nozzle-tester.app/Contents/Info.plist
+          test -x build/nozzle-tester.app/Contents/MacOS/nozzle-tester
 
       - name: Generate evidence fixture
         shell: bash
@@ -95,7 +97,12 @@ jobs:
             package_name="${repo}-ci-${short_sha}-${platform}"
           fi
           mkdir -p "$package_name"
-          if [ -x build/nozzle-tester-cli ]; then
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            test -d build/nozzle-tester.app
+            test -x build/nozzle-tester.app/Contents/MacOS/nozzle-tester
+            cp build/nozzle-tester-cli "$package_name/"
+            cp -R build/nozzle-tester.app "$package_name/"
+          elif [ -x build/nozzle-tester-cli ]; then
             cp build/nozzle-tester-cli "$package_name/"
             cp build/nozzle-tester "$package_name/"
           else
@@ -106,6 +113,9 @@ jobs:
           cp README.md "$package_name/"
           cp -R docs "$package_name/docs"
           cmake -E tar cf "${package_name}.zip" --format=zip "$package_name"
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            zipinfo -l "${package_name}.zip" | grep 'nozzle-tester.app/Contents/MacOS/nozzle-tester'
+          fi
           echo "package_root=${package_name}" >> "$GITHUB_OUTPUT"
           echo "package_name=${package_name}.zip" >> "$GITHUB_OUTPUT"
 

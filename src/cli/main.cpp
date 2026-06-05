@@ -7,7 +7,9 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <string>
 #include <thread>
+#include <vector>
 
 namespace {
 
@@ -17,6 +19,7 @@ struct cli_options {
     std::string output_path;
     std::string evidence_path;
     std::string sender_name{"nozzle_tester"};
+    bool sender_name_provided{false};
     uint32_t width{320};
     uint32_t height{240};
     uint32_t expected_width{320};
@@ -29,13 +32,45 @@ struct cli_options {
 };
 
 void print_usage(const char *program) {
-    std::fprintf(stderr, "Usage: %s <pattern|verify|self-test|sender|receiver> [options]\n", program);
+    std::fprintf(stderr, "Usage: %s <pattern|verify|self-test|sender|receiver|discover> [options]\n", program);
     std::fprintf(stderr, "Common options:\n");
     std::fprintf(stderr, "  --width N --height N --format rgba8_unorm|bgra8_unorm|rgba16_float|rgba32_float\n");
     std::fprintf(stderr, "  --frame N / --expected-frame N\n");
     std::fprintf(stderr, "  --output PATH --input PATH --evidence PATH\n");
     std::fprintf(stderr, "Sender/receiver options:\n");
     std::fprintf(stderr, "  --name NAME --frames N --timeout-ms N --delay-ms N\n");
+    std::fprintf(stderr, "Discovery options:\n");
+    std::fprintf(stderr, "  discover [--name NAME] [--timeout-ms N]\n");
+}
+
+const char *nozzle_error_name(NozzleErrorCode error) {
+    switch(error) {
+        case NOZZLE_OK: return "NOZZLE_OK";
+        case NOZZLE_ERROR_UNKNOWN: return "NOZZLE_ERROR_UNKNOWN";
+        case NOZZLE_ERROR_INVALID_ARGUMENT: return "NOZZLE_ERROR_INVALID_ARGUMENT";
+        case NOZZLE_ERROR_UNSUPPORTED_BACKEND: return "NOZZLE_ERROR_UNSUPPORTED_BACKEND";
+        case NOZZLE_ERROR_UNSUPPORTED_FORMAT: return "NOZZLE_ERROR_UNSUPPORTED_FORMAT";
+        case NOZZLE_ERROR_DEVICE_MISMATCH: return "NOZZLE_ERROR_DEVICE_MISMATCH";
+        case NOZZLE_ERROR_RESOURCE_CREATION_FAILED: return "NOZZLE_ERROR_RESOURCE_CREATION_FAILED";
+        case NOZZLE_ERROR_SHARED_HANDLE_FAILED: return "NOZZLE_ERROR_SHARED_HANDLE_FAILED";
+        case NOZZLE_ERROR_SENDER_NOT_FOUND: return "NOZZLE_ERROR_SENDER_NOT_FOUND";
+        case NOZZLE_ERROR_SENDER_CLOSED: return "NOZZLE_ERROR_SENDER_CLOSED";
+        case NOZZLE_ERROR_TIMEOUT: return "NOZZLE_ERROR_TIMEOUT";
+        case NOZZLE_ERROR_BACKEND_ERROR: return "NOZZLE_ERROR_BACKEND_ERROR";
+        case NOZZLE_ERROR_COMMAND_FAILED: return "NOZZLE_ERROR_COMMAND_FAILED";
+        default: return "NOZZLE_ERROR_UNRECOGNIZED";
+    }
+}
+
+const char *backend_name(NozzleBackendType backend) {
+    switch(backend) {
+        case NOZZLE_BACKEND_D3D11: return "D3D11";
+        case NOZZLE_BACKEND_METAL: return "Metal";
+        case NOZZLE_BACKEND_OPENGL: return "OpenGL";
+        case NOZZLE_BACKEND_DMA_BUF: return "DMA-BUF";
+        case NOZZLE_BACKEND_UNKNOWN: return "Unknown";
+        default: return "Unknown";
+    }
 }
 
 bool parse_u32(const char *text, uint32_t &out_value) {
@@ -113,6 +148,7 @@ bool parse_options(int argc, char **argv, cli_options &options) {
             const char *value = require_value(arg);
             if(value == nullptr) return false;
             options.sender_name = value;
+            options.sender_name_provided = true;
         } else if(std::strcmp(arg, "--help") == 0) {
             return false;
         } else {
@@ -322,7 +358,8 @@ int run_sender(const cli_options &options) {
 
     if(error != NOZZLE_OK || sender == nullptr) {
         record.verification.result = nozzle_tester::verdict::fail;
-        record.verification.failure_reasons.push_back("sender_create_failed");
+        record.verification.failure_reasons.push_back(std::string("sender_create_failed:") + nozzle_error_name(error));
+        std::fprintf(stderr, "sender_create_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
         emit_evidence(record, options.evidence_path);
         return 1;
     }
@@ -331,12 +368,16 @@ int run_sender(const cli_options &options) {
     for(uint32_t frame = 0; frame < options.frames; frame++) {
         NozzleFrame *writable = nullptr;
         error = nozzle_sender_acquire_writable_frame(sender, options.width, options.height, to_nozzle_format(options.format), &writable);
-        if(error != NOZZLE_OK || writable == nullptr) break;
+        if(error != NOZZLE_OK || writable == nullptr) {
+            std::fprintf(stderr, "acquire_writable_frame_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
+            break;
+        }
 
         NozzlePixelMapping *mapping = nullptr;
         NozzleMappedPixels pixels{};
         error = nozzle_frame_lock_writable_pixels_mapping_with_origin(writable, NOZZLE_ORIGIN_TOP_LEFT, &mapping, &pixels);
         if(error != NOZZLE_OK || mapping == nullptr || pixels.data == nullptr) {
+            std::fprintf(stderr, "writable_mapping_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
             nozzle_sender_discard_frame(sender, writable);
             nozzle_frame_release(writable);
             break;
@@ -354,7 +395,10 @@ int run_sender(const cli_options &options) {
         nozzle_pixel_mapping_unlock(&mapping);
         error = nozzle_sender_commit_frame(sender, writable);
         nozzle_frame_release(writable);
-        if(error != NOZZLE_OK) break;
+        if(error != NOZZLE_OK) {
+            std::fprintf(stderr, "commit_frame_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
+            break;
+        }
         published += 1;
         if(0 < options.delay_ms) {
             std::this_thread::sleep_for(std::chrono::milliseconds(options.delay_ms));
@@ -478,6 +522,68 @@ int run_receiver(const cli_options &options) {
     return record.verification.result == nozzle_tester::verdict::pass ? 0 : 1;
 }
 
+bool sender_array_contains(const NozzleSenderInfoArray &array, const std::string &name) {
+    for(uint32_t index = 0; index < array.count; index++) {
+        const NozzleSenderInfo &info = array.items[index];
+        if(info.name != nullptr && name == info.name) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void print_sender_array(const NozzleSenderInfoArray &array) {
+    std::printf("senders: %u\n", array.count);
+    for(uint32_t index = 0; index < array.count; index++) {
+        const NozzleSenderInfo &info = array.items[index];
+        std::printf(
+            "sender[%u] name=%s application=%s id=%s backend=%s\n",
+            index,
+            info.name != nullptr ? info.name : "",
+            info.application_name != nullptr ? info.application_name : "",
+            info.id != nullptr ? info.id : "",
+            backend_name(info.backend));
+    }
+}
+
+int run_discover(const cli_options &options) {
+    const auto start = std::chrono::steady_clock::now();
+    while(true) {
+        NozzleSenderInfoArray array{};
+        const NozzleErrorCode error = nozzle_enumerate_senders(&array);
+        if(error != NOZZLE_OK) {
+            std::fprintf(stderr, "enumerate_senders_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
+            return 1;
+        }
+
+        const bool found = !options.sender_name_provided || sender_array_contains(array, options.sender_name);
+        if(found || options.timeout_ms == 0) {
+            print_sender_array(array);
+            nozzle_free_sender_info_array(&array);
+            if(options.sender_name_provided && !found) {
+                std::fprintf(stderr, "sender_not_found: %s\n", options.sender_name.c_str());
+                return 1;
+            }
+            return 0;
+        }
+
+        nozzle_free_sender_info_array(&array);
+        const auto now = std::chrono::steady_clock::now();
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - start).count();
+        if((uint64_t)elapsed >= options.timeout_ms) {
+            NozzleSenderInfoArray final_array{};
+            const NozzleErrorCode final_error = nozzle_enumerate_senders(&final_array);
+            if(final_error == NOZZLE_OK) {
+                print_sender_array(final_array);
+                nozzle_free_sender_info_array(&final_array);
+            }
+            std::fprintf(stderr, "sender_not_found: %s\n", options.sender_name.c_str());
+            return 1;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -492,6 +598,7 @@ int main(int argc, char **argv) {
     if(options.command == "self-test") return run_self_test(options);
     if(options.command == "sender") return run_sender(options);
     if(options.command == "receiver") return run_receiver(options);
+    if(options.command == "discover") return run_discover(options);
 
     std::fprintf(stderr, "unknown command: %s\n", options.command.c_str());
     print_usage(argv[0]);

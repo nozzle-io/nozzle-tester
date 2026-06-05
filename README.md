@@ -54,6 +54,13 @@ Start a CPU writable-frame sender path:
 build/nozzle-tester-cli sender --name nozzle_tester --width 320 --height 240 --format rgba8_unorm --frames 60 --evidence build/sender.json
 ```
 
+List currently discoverable senders, or wait for a named sender:
+
+```bash
+build/nozzle-tester-cli discover --timeout-ms 0
+build/nozzle-tester-cli discover --name nozzle_tester --timeout-ms 2000
+```
+
 Receive and verify frames:
 
 ```bash
@@ -66,6 +73,12 @@ Run:
 
 ```bash
 build/nozzle-tester
+```
+
+On macOS, the GUI build product is an app bundle:
+
+```bash
+open build/nozzle-tester.app
 ```
 
 The GUI provides:
