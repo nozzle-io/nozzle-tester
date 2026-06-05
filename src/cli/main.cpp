@@ -347,6 +347,8 @@ int run_sender(const cli_options &options) {
     desc.name = options.sender_name.c_str();
     desc.application_name = "nozzle-tester";
     desc.ring_buffer_size = 3;
+    desc.fallback_flags_valid = 1;
+    desc.fallback_flags = NOZZLE_FALLBACK_SAFE_DEFAULTS;
 
     NozzleSender *sender = nullptr;
     NozzleErrorCode error = nozzle_sender_create(&desc, &sender);

@@ -210,6 +210,8 @@ bool start_runtime(gui_state &state) {
         sender_desc.name = state.channel_name;
         sender_desc.application_name = "nozzle-tester-gui";
         sender_desc.ring_buffer_size = 3;
+        sender_desc.fallback_flags_valid = 1;
+        sender_desc.fallback_flags = NOZZLE_FALLBACK_SAFE_DEFAULTS;
         NozzleErrorCode error = nozzle_sender_create(&sender_desc, &state.sender);
         if(error != NOZZLE_OK || state.sender == nullptr) {
             state.last_error = error_text("sender_create_failed", error);
