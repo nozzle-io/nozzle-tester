@@ -3,12 +3,13 @@ name: CI
 on:
   push:
     branches: [main, stable]
+    tags: ['v*']
   pull_request:
     branches: [main, stable]
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -36,13 +37,30 @@ jobs:
           sudo apt-get install -y pkg-config libdrm-dev libgbm-dev libegl1-mesa-dev libgl1-mesa-dev xorg-dev libglu1-mesa-dev
 
       - name: Configure
-        run: cmake -S . -B build -DNOZZLE_TESTER_BUILD_GUI=ON -DNOZZLE_TESTER_BUILD_TESTS=ON
+        shell: bash
+        run: |
+          if [ "${{ runner.os }}" = "macOS" ]; then
+            cmake -S . -B build -DNOZZLE_TESTER_BUILD_GUI=ON -DNOZZLE_TESTER_BUILD_TESTS=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+          else
+            cmake -S . -B build -DNOZZLE_TESTER_BUILD_GUI=ON -DNOZZLE_TESTER_BUILD_TESTS=ON
+          fi
 
       - name: Build
         run: cmake --build build --config Release
 
       - name: Test
         run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Verify universal binaries
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          for binary in build/nozzle-tester build/nozzle-tester-cli; do
+            archs=$(lipo -archs "$binary")
+            echo "$binary: $archs"
+            echo "$archs" | grep -q "arm64" || { echo "Missing arm64 slice in $binary"; exit 1; }
+            echo "$archs" | grep -q "x86_64" || { echo "Missing x86_64 slice in $binary"; exit 1; }
+          done
 
       - name: Generate evidence fixture
         shell: bash
@@ -56,9 +74,26 @@ jobs:
           python scripts/validate-evidence.py build/nozzle-tester-self-test.json
 
       - name: Stage release package
+        id: package
         shell: bash
         run: |
-          package="nozzle-tester-${{ runner.os }}"
+          repo="${{ github.event.repository.name }}"
+          short_sha="${GITHUB_SHA::7}"
+          case "${{ runner.os }}" in
+            Linux) platform="linux-x64" ;;
+            macOS) platform="macos-universal" ;;
+            Windows) platform="windows-x64" ;;
+            *) echo "unsupported runner OS: ${{ runner.os }}" >&2; exit 1 ;;
+          esac
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            package="${repo}-${GITHUB_REF_NAME}-${platform}"
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            package="${repo}-latest-${short_sha}-${platform}"
+          elif [[ "${GITHUB_REF}" == refs/heads/stable ]]; then
+            package="${repo}-stable-${short_sha}-${platform}"
+          else
+            package="${repo}-ci-${short_sha}-${platform}"
+          fi
           mkdir -p "$package"
           if [ -x build/nozzle-tester-cli ]; then
             cp build/nozzle-tester-cli "$package/"
@@ -71,31 +106,39 @@ jobs:
           cp README.md "$package/"
           cp -R docs "$package/docs"
           cmake -E tar cf "${package}.zip" --format=zip "$package"
+          echo "package_root=${package}" >> "$GITHUB_OUTPUT"
+          echo "package_name=${package}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Upload release package artifact
         uses: actions/upload-artifact@v4
         with:
-          name: nozzle-tester-package-${{ runner.os }}
-          path: nozzle-tester-${{ runner.os }}.zip
+          name: ${{ steps.package.outputs.package_root }}
+          path: ${{ steps.package.outputs.package_name }}
           if-no-files-found: error
 
       - name: Upload evidence fixture
         uses: actions/upload-artifact@v4
         with:
-          name: nozzle-tester-self-test-${{ matrix.os }}
+          name: evidence-nozzle-tester-self-test-${{ matrix.os }}
           path: build/nozzle-tester-self-test.json
           if-no-files-found: error
 
-  latest-release:
-    name: Publish latest release
+
+  release:
+    name: Publish release
     needs: build
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Move latest tag
+        if: github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -105,17 +148,138 @@ jobs:
       - name: Download release packages
         uses: actions/download-artifact@v4
         with:
-          pattern: nozzle-tester-package-*
+          pattern: nozzle-tester-*
           path: dist
           merge-multiple: true
 
-      - name: Publish latest release
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Verify downloaded packages
         run: |
-          if gh release view latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit latest --repo "$GITHUB_REPOSITORY" --title "latest" --notes "Moving latest build from main." --latest
+          short_sha="${GITHUB_SHA::7}"
+          platforms=(macos-universal windows-x64 linux-x64)
+          if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            prefix="nozzle-tester-latest-${short_sha}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            prefix="nozzle-tester-${GITHUB_REF_NAME}"
           else
-            gh release create latest --repo "$GITHUB_REPOSITORY" --verify-tag --title "latest" --notes "Moving latest build from main." --latest
+            echo "unsupported release ref: ${GITHUB_REF}" >&2
+            exit 1
           fi
-          gh release upload latest dist/nozzle-tester-*.zip --repo "$GITHUB_REPOSITORY" --clobber
+          for platform in "${platforms[@]}"; do
+            test -f "dist/${prefix}-${platform}.zip"
+          done
+
+      - name: Generate checksums and manifest
+        env:
+          APP_ID: nozzle-tester
+          EXPECTED_PLATFORMS: "macos-universal windows-x64 linux-x64"
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            prefix="nozzle-tester-latest-${short_sha}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            prefix="nozzle-tester-${GITHUB_REF_NAME}"
+          else
+            echo "unsupported release ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          packages=(
+            "dist/${prefix}-macos-universal.zip"
+            "dist/${prefix}-windows-x64.zip"
+            "dist/${prefix}-linux-x64.zip"
+          )
+          for package in "${packages[@]}"; do
+            test -f "$package"
+          done
+          : > SHA256SUMS
+          for package in "${packages[@]}"; do
+            checksum=$(sha256sum "$package" | awk '{print $1}')
+            printf '%s  %s\n' "$checksum" "$(basename "$package")" >> SHA256SUMS
+          done
+          python3 scripts/write-release-manifest.py --app-id "$APP_ID" --expected-platforms macos-universal windows-x64 linux-x64 --output manifest.json "${packages[@]}"
+          cat SHA256SUMS
+          cat manifest.json
+
+      - name: Check versioned release asset does not exist
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          release_tag="${GITHUB_REF_NAME}"
+          mapfile -t package_paths < <(find dist -maxdepth 1 -name "nozzle-tester-${release_tag}-*.zip" -print | sort)
+          packages=()
+          for path in "${package_paths[@]}"; do
+            packages+=("$(basename "$path")")
+          done
+          packages+=(SHA256SUMS manifest.json)
+          if release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" --jq .id 2>/dev/null); then
+            gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --jq '.[].name' > existing-assets.txt
+            for asset in "${packages[@]}"; do
+              if grep -Fx "$asset" existing-assets.txt; then
+                echo "versioned release asset already exists: $asset" >&2
+                exit 1
+              fi
+            done
+          else
+            echo "No existing release for $release_tag; create step will create it."
+          fi
+
+      - name: Create or update release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          short_sha="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            release_tag="latest"
+            prefix="nozzle-tester-latest-${short_sha}"
+            title="Latest development snapshot"
+            notes="Mutable development snapshot from main. Commit: ${GITHUB_SHA}"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            release_tag="${GITHUB_REF_NAME}"
+            prefix="nozzle-tester-${GITHUB_REF_NAME}"
+            title="$release_tag"
+            notes="Release $release_tag"
+          else
+            echo "unsupported release ref: ${GITHUB_REF}" >&2
+            exit 1
+          fi
+          assets=(
+            "dist/${prefix}-macos-universal.zip"
+            "dist/${prefix}-windows-x64.zip"
+            "dist/${prefix}-linux-x64.zip"
+            SHA256SUMS
+            manifest.json
+          )
+          if [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            if release_id=$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" --jq .id 2>/dev/null); then
+              gh api "repos/${GITHUB_REPOSITORY}/releases/${release_id}/assets" --jq '.[].id' > release-asset-ids.txt
+              while IFS= read -r asset_id; do
+                if [ -n "$asset_id" ]; then
+                  gh api -X DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+                fi
+              done < release-asset-ids.txt
+              gh release edit "$release_tag" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --title "$title" \
+                --notes "$notes" \
+                --prerelease
+              gh release upload "$release_tag" "${assets[@]}" --repo "${GITHUB_REPOSITORY}"
+            else
+              gh release create "$release_tag" "${assets[@]}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --verify-tag \
+                --title "$title" \
+                --notes "$notes" \
+                --prerelease
+            fi
+          else
+            if gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${release_tag}" --jq .id >/dev/null 2>&1; then
+              gh release upload "$release_tag" "${assets[@]}" --repo "${GITHUB_REPOSITORY}"
+            else
+              gh release create "$release_tag" "${assets[@]}" \
+                --repo "${GITHUB_REPOSITORY}" \
+                --title "$title" \
+                --notes "$notes"
+            fi
+          fi
+          echo "Release URL and uploaded assets:"
+          gh release view "$release_tag" --repo "${GITHUB_REPOSITORY}" --json url,assets --jq '.url, (.assets[].name)'
