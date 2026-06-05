@@ -86,28 +86,28 @@ jobs:
             *) echo "unsupported runner OS: ${{ runner.os }}" >&2; exit 1 ;;
           esac
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
-            package="${repo}-${GITHUB_REF_NAME}-${platform}"
+            package_name="${repo}-${GITHUB_REF_NAME}-${platform}"
           elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
-            package="${repo}-latest-${short_sha}-${platform}"
+            package_name="${repo}-latest-${short_sha}-${platform}"
           elif [[ "${GITHUB_REF}" == refs/heads/stable ]]; then
-            package="${repo}-stable-${short_sha}-${platform}"
+            package_name="${repo}-stable-${short_sha}-${platform}"
           else
-            package="${repo}-ci-${short_sha}-${platform}"
+            package_name="${repo}-ci-${short_sha}-${platform}"
           fi
-          mkdir -p "$package"
+          mkdir -p "$package_name"
           if [ -x build/nozzle-tester-cli ]; then
-            cp build/nozzle-tester-cli "$package/"
-            cp build/nozzle-tester "$package/"
+            cp build/nozzle-tester-cli "$package_name/"
+            cp build/nozzle-tester "$package_name/"
           else
-            cp build/Release/nozzle-tester-cli.exe "$package/"
-            cp build/Release/nozzle-tester.exe "$package/"
+            cp build/Release/nozzle-tester-cli.exe "$package_name/"
+            cp build/Release/nozzle-tester.exe "$package_name/"
           fi
-          cp build/nozzle-tester-self-test.json "$package/"
-          cp README.md "$package/"
-          cp -R docs "$package/docs"
-          cmake -E tar cf "${package}.zip" --format=zip "$package"
-          echo "package_root=${package}" >> "$GITHUB_OUTPUT"
-          echo "package_name=${package}.zip" >> "$GITHUB_OUTPUT"
+          cp build/nozzle-tester-self-test.json "$package_name/"
+          cp README.md "$package_name/"
+          cp -R docs "$package_name/docs"
+          cmake -E tar cf "${package_name}.zip" --format=zip "$package_name"
+          echo "package_root=${package_name}" >> "$GITHUB_OUTPUT"
+          echo "package_name=${package_name}.zip" >> "$GITHUB_OUTPUT"
 
       - name: Upload release package artifact
         uses: actions/upload-artifact@v4
