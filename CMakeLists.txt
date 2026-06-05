@@ -127,4 +127,10 @@ if(NOZZLE_TESTER_BUILD_TESTS)
             --cli $<TARGET_FILE:nozzle-tester-cli>
     )
     set_tests_properties(nozzle_tester_cli_discovery_smoke PROPERTIES SKIP_RETURN_CODE 77)
+    add_test(
+        NAME nozzle_tester_cli_sender_publish_smoke
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/sender_publish_smoke.py
+            --cli $<TARGET_FILE:nozzle-tester-cli>
+    )
+    set_tests_properties(nozzle_tester_cli_sender_publish_smoke PROPERTIES SKIP_RETURN_CODE 77)
 endif()
