@@ -19,6 +19,28 @@ set(GLFW_INSTALL OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_WAYLAND OFF CACHE BOOL "" FORCE)
 set(GLFW_BUILD_X11 ON CACHE BOOL "" FORCE)
 
+execute_process(
+    COMMAND git rev-parse --short=12 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    OUTPUT_VARIABLE NOZZLE_TESTER_GIT_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT NOZZLE_TESTER_GIT_SHA)
+    set(NOZZLE_TESTER_GIT_SHA unknown)
+endif()
+
+execute_process(
+    COMMAND git rev-parse --short=12 HEAD
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/deps/nozzle
+    OUTPUT_VARIABLE NOZZLE_TESTER_NOZZLE_CORE_SHA
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET
+)
+if(NOT NOZZLE_TESTER_NOZZLE_CORE_SHA)
+    set(NOZZLE_TESTER_NOZZLE_CORE_SHA unknown)
+endif()
+
 add_subdirectory(deps/nozzle)
 
 add_library(nozzle_tester_core STATIC
@@ -26,6 +48,10 @@ add_library(nozzle_tester_core STATIC
     src/core/pattern.cpp
 )
 target_include_directories(nozzle_tester_core PUBLIC src)
+target_compile_definitions(nozzle_tester_core PRIVATE
+    NOZZLE_TESTER_REPO_SHA="${NOZZLE_TESTER_GIT_SHA}"
+    NOZZLE_TESTER_NOZZLE_CORE_SHA="${NOZZLE_TESTER_NOZZLE_CORE_SHA}"
+)
 target_compile_options(nozzle_tester_core PRIVATE
     $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wall -Wextra -Wpedantic>
     $<$<CXX_COMPILER_ID:GNU>:-Wall -Wextra -Wpedantic>

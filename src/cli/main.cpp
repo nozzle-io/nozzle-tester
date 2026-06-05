@@ -133,6 +133,16 @@ NozzleTextureFormat to_nozzle_format(nozzle_tester::tester_format format) {
     }
 }
 
+bool from_nozzle_format(NozzleTextureFormat format, nozzle_tester::tester_format &out_format) {
+    switch(format) {
+        case NOZZLE_FORMAT_RGBA8_UNORM: out_format = nozzle_tester::tester_format::rgba8_unorm; return true;
+        case NOZZLE_FORMAT_BGRA8_UNORM: out_format = nozzle_tester::tester_format::bgra8_unorm; return true;
+        case NOZZLE_FORMAT_RGBA16_FLOAT: out_format = nozzle_tester::tester_format::rgba16_float; return true;
+        case NOZZLE_FORMAT_RGBA32_FLOAT: out_format = nozzle_tester::tester_format::rgba32_float; return true;
+        default: return false;
+    }
+}
+
 void emit_evidence(const nozzle_tester::evidence_record &record, const std::string &path) {
     const std::string json = nozzle_tester::make_evidence_json(record);
     if(path.empty()) {
@@ -171,6 +181,8 @@ int run_pattern(const cli_options &options) {
     record.observed_frame_index = test.frame_index;
     record.observed_frame_count = 1;
     record.changed_across_observations = true;
+    record.native_texture_format = nozzle_tester::format_to_string(test.format);
+    record.cpu_evidence_format = nozzle_tester::format_to_string(test.format);
     record.verification = nozzle_tester::verify_pattern(image, test);
     if(!options.output_path.empty()) record.artifact_paths.push_back(options.output_path);
     emit_evidence(record, options.evidence_path);
@@ -205,6 +217,8 @@ int run_verify(const cli_options &options) {
     record.observed_frame_index = options.frame_index;
     record.observed_frame_count = 1;
     record.changed_across_observations = true;
+    record.native_texture_format = nozzle_tester::format_to_string(options.format);
+    record.cpu_evidence_format = nozzle_tester::format_to_string(options.format);
     record.artifact_paths.push_back(options.input_path);
     record.verification = nozzle_tester::verify_pattern(image, test);
     emit_evidence(record, options.evidence_path);
@@ -212,47 +226,73 @@ int run_verify(const cli_options &options) {
 }
 
 int run_self_test(const cli_options &options) {
-    nozzle_tester::test_case test{};
-    test.id = "self-test";
-    test.width = 641;
-    test.height = 479;
-    test.format = nozzle_tester::tester_format::rgba8_unorm;
-    test.frame_index = 3;
-    const nozzle_tester::image_buffer good = nozzle_tester::generate_pattern(test);
-
     struct case_result {
         std::string name;
         nozzle_tester::verify_result result;
         bool expected_pass{false};
     };
     std::vector<case_result> cases;
-    cases.push_back({"good", nozzle_tester::verify_pattern(good, test), true});
-    cases.push_back({"vertical_flip", nozzle_tester::verify_pattern(nozzle_tester::make_vertical_flip_fixture(good), test), false});
-    cases.push_back({"rb_swap", nozzle_tester::verify_pattern(nozzle_tester::make_rb_swap_fixture(good), test), false});
-    cases.push_back({"alpha_zero", nozzle_tester::verify_pattern(nozzle_tester::make_alpha_zero_fixture(good), test), false});
-    nozzle_tester::test_case stale_test = test;
-    stale_test.frame_index = 4;
-    cases.push_back({"stale_previous", nozzle_tester::verify_pattern(good, stale_test), false});
+    const nozzle_tester::tester_format formats[] = {
+        nozzle_tester::tester_format::rgba8_unorm,
+        nozzle_tester::tester_format::bgra8_unorm,
+        nozzle_tester::tester_format::rgba16_float,
+        nozzle_tester::tester_format::rgba32_float,
+    };
+    nozzle_tester::test_case first_test{};
+    first_test.id = "self-test";
+    first_test.width = 641;
+    first_test.height = 479;
+    first_test.format = nozzle_tester::tester_format::rgba8_unorm;
+    first_test.frame_index = 3;
+    for(auto format : formats) {
+        nozzle_tester::test_case test = first_test;
+        test.format = format;
+        const nozzle_tester::image_buffer good = nozzle_tester::generate_pattern(test);
+        const std::string prefix = std::string(nozzle_tester::format_to_string(format)) + ":";
+        cases.push_back({prefix + "good", nozzle_tester::verify_pattern(good, test), true});
+        cases.push_back({prefix + "vertical_flip", nozzle_tester::verify_pattern(nozzle_tester::make_vertical_flip_fixture(good), test), false});
+        cases.push_back({prefix + "rb_swap", nozzle_tester::verify_pattern(nozzle_tester::make_rb_swap_fixture(good), test), false});
+        cases.push_back({prefix + "alpha_zero", nozzle_tester::verify_pattern(nozzle_tester::make_alpha_zero_fixture(good), test), false});
+        nozzle_tester::test_case stale_test = test;
+        stale_test.frame_index += 1;
+        cases.push_back({prefix + "stale_previous", nozzle_tester::verify_pattern(good, stale_test), false});
+    }
 
     bool ok = true;
     std::string reasons;
+    std::vector<std::string> covered_failure_reasons;
     for(const auto &item : cases) {
         const bool passed = item.result.result == nozzle_tester::verdict::pass;
         if(passed != item.expected_pass) {
             ok = false;
             reasons += item.name + " did not produce expected verdict;";
         }
+        for(const auto &reason : item.result.failure_reasons) {
+            bool found = false;
+            for(const auto &covered : covered_failure_reasons) {
+                if(covered == reason) {
+                    found = true;
+                    break;
+                }
+            }
+            if(!found) covered_failure_reasons.push_back(reason);
+        }
     }
 
     nozzle_tester::evidence_record record{};
     record.role = "self-test";
     record.backend = "cpu";
-    record.test = test;
-    record.observed_width = test.width;
-    record.observed_height = test.height;
-    record.observed_frame_index = test.frame_index;
+    record.test = first_test;
+    record.observed_width = first_test.width;
+    record.observed_height = first_test.height;
+    record.observed_frame_index = first_test.frame_index;
     record.observed_frame_count = (uint64_t)cases.size();
     record.changed_across_observations = true;
+    record.covered_failure_reasons = covered_failure_reasons;
+    if(!options.evidence_path.empty()) {
+        record.artifact_paths.push_back(options.evidence_path);
+        record.artifacts.push_back({"self_test_evidence", options.evidence_path});
+    }
     record.verification = cases.front().result;
     if(!ok) {
         record.verification.result = nozzle_tester::verdict::fail;
@@ -277,6 +317,8 @@ int run_sender(const cli_options &options) {
     record.test = make_test(options);
     record.observed_width = options.width;
     record.observed_height = options.height;
+    record.native_texture_format = nozzle_tester::format_to_string(options.format);
+    record.cpu_evidence_format = nozzle_tester::format_to_string(options.format);
 
     if(error != NOZZLE_OK || sender == nullptr) {
         record.verification.result = nozzle_tester::verdict::fail;
@@ -363,6 +405,7 @@ int run_receiver(const cli_options &options) {
     uint32_t observed = 0;
     bool all_passed = true;
     for(uint32_t frame = 0; frame < options.frames; frame++) {
+        (void)frame;
         NozzleAcquireDesc acquire_desc{};
         acquire_desc.timeout_ms = options.timeout_ms;
         NozzleFrame *nozzle_frame = nullptr;
@@ -378,7 +421,15 @@ int run_receiver(const cli_options &options) {
             all_passed = false;
             break;
         }
-        const uint32_t bpp = nozzle_tester::bytes_per_pixel(options.format);
+        nozzle_tester::tester_format observed_format{};
+        if(!from_nozzle_format(info.format, observed_format)) {
+            nozzle_frame_release(nozzle_frame);
+            all_passed = false;
+            record.verification.result = nozzle_tester::verdict::fail;
+            record.verification.failure_reasons.push_back("unsupported_observed_format");
+            break;
+        }
+        const uint32_t bpp = nozzle_tester::bytes_per_pixel(observed_format);
         std::vector<uint8_t> copied((size_t)info.width * info.height * bpp);
         NozzleMappedPixels copied_pixels{};
         error = nozzle_frame_copy_pixels_with_origin(nozzle_frame, NOZZLE_ORIGIN_TOP_LEFT, copied.data(), copied.size(), &copied_pixels);
@@ -391,10 +442,11 @@ int run_receiver(const cli_options &options) {
         nozzle_tester::image_buffer image{};
         image.width = info.width;
         image.height = info.height;
-        image.format = options.format;
+        image.format = observed_format;
         image.bytes = copied;
         nozzle_tester::test_case expected = record.test;
-        expected.frame_index = frame;
+        expected.format = options.format;
+        expected.frame_index = info.frame_index;
         const nozzle_tester::verify_result verify = nozzle_tester::verify_pattern(image, expected);
         if(verify.result != nozzle_tester::verdict::pass) {
             all_passed = false;
@@ -403,6 +455,8 @@ int run_receiver(const cli_options &options) {
         record.observed_width = info.width;
         record.observed_height = info.height;
         record.observed_frame_index = info.frame_index;
+        record.native_texture_format = nozzle_tester::format_to_string(observed_format);
+        record.cpu_evidence_format = nozzle_tester::format_to_string(observed_format);
         observed += 1;
     }
 

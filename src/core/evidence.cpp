@@ -5,6 +5,14 @@
 
 namespace nozzle_tester {
 
+#ifndef NOZZLE_TESTER_REPO_SHA
+#define NOZZLE_TESTER_REPO_SHA "unknown"
+#endif
+
+#ifndef NOZZLE_TESTER_NOZZLE_CORE_SHA
+#define NOZZLE_TESTER_NOZZLE_CORE_SHA "unknown"
+#endif
+
 std::string json_escape(const std::string &text) {
     std::string result;
     result.reserve(text.size() + 8);
@@ -54,16 +62,30 @@ void append_string_array(std::ostringstream &stream, const std::vector<std::stri
     stream << "]";
 }
 
+void append_artifacts(std::ostringstream &stream, const std::vector<evidence_artifact> &artifacts) {
+    stream << "[";
+    for(size_t index = 0; index < artifacts.size(); index++) {
+        if(index != 0) stream << ",";
+        stream << "{";
+        stream << "\"role\":\"" << json_escape(artifacts[index].role) << "\",";
+        stream << "\"path\":\"" << json_escape(artifacts[index].path) << "\"";
+        stream << "}";
+    }
+    stream << "]";
+}
+
 } // namespace
 
 std::string make_evidence_json(const evidence_record &record) {
+    const std::string repo_sha = record.repo_sha == "unknown" ? NOZZLE_TESTER_REPO_SHA : record.repo_sha;
+    const std::string nozzle_core_sha = record.nozzle_core_sha == "unknown" ? NOZZLE_TESTER_NOZZLE_CORE_SHA : record.nozzle_core_sha;
     std::ostringstream stream;
     stream << "{\n";
     stream << "  \"schema_version\": \"0.1.0\",\n";
     stream << "  \"tool\": \"nozzle-tester\",\n";
     stream << "  \"tool_version\": \"0.1.0\",\n";
-    stream << "  \"repo_sha\": \"" << json_escape(record.repo_sha) << "\",\n";
-    stream << "  \"nozzle_core_sha\": \"" << json_escape(record.nozzle_core_sha) << "\",\n";
+    stream << "  \"repo_sha\": \"" << json_escape(repo_sha) << "\",\n";
+    stream << "  \"nozzle_core_sha\": \"" << json_escape(nozzle_core_sha) << "\",\n";
     stream << "  \"os\": \"" << json_escape(detect_os_name()) << "\",\n";
     stream << "  \"backend\": \"" << json_escape(record.backend) << "\",\n";
     stream << "  \"role\": \"" << json_escape(record.role) << "\",\n";
@@ -100,6 +122,12 @@ std::string make_evidence_json(const evidence_record &record) {
     stream << "  \"verdict\": \"" << verdict_to_string(record.verification.result) << "\",\n";
     stream << "  \"failure_reasons\": ";
     append_string_array(stream, record.verification.failure_reasons);
+    stream << ",\n";
+    stream << "  \"covered_failure_reasons\": ";
+    append_string_array(stream, record.covered_failure_reasons);
+    stream << ",\n";
+    stream << "  \"artifacts\": ";
+    append_artifacts(stream, record.artifacts);
     stream << ",\n";
     stream << "  \"artifact_paths\": ";
     append_string_array(stream, record.artifact_paths);

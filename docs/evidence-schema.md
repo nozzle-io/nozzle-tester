@@ -9,8 +9,8 @@ Top-level fields:
   "schema_version": "0.1.0",
   "tool": "nozzle-tester",
   "tool_version": "0.1.0",
-  "repo_sha": "unknown",
-  "nozzle_core_sha": "unknown",
+  "repo_sha": "build git SHA or explicit unknown",
+  "nozzle_core_sha": "recorded deps/nozzle git SHA or explicit unknown",
   "os": "macOS|Windows|Linux|unknown",
   "backend": "cpu|d3d11|metal|opengl|dmabuf|unknown",
   "role": "pattern|verify|self-test|sender|receiver|gui-preview|loopback-sender|loopback-receiver",
@@ -31,9 +31,16 @@ Top-level fields:
     "stride_or_stretch": "PASS|FAIL|INCONCLUSIVE"
   },
   "verdict": "PASS|FAIL|SKIP|INCONCLUSIVE",
-  "failure_reasons": ["vertical_flip", "rb_swap", "alpha_mismatch", "stale_frame", "dimension_mismatch", "pixel_mismatch", "timeout", "missing_frame"],
-  "artifact_paths": ["capture.raw", "capture.png", "summary.json"]
+  "failure_reasons": ["vertical_flip", "rb_swap", "alpha_mismatch", "stale_frame", "dimension_mismatch", "byte_size_mismatch", "pixel_mismatch", "timeout", "missing_frame"],
+  "covered_failure_reasons": ["vertical_flip", "rb_swap", "alpha_mismatch", "stale_frame"],
+  "artifacts": [
+    { "role": "raw_capture", "path": "capture.raw" },
+    { "role": "preview_capture", "path": "capture.rgba" }
+  ],
+  "artifact_paths": ["capture.raw", "capture.rgba", "summary.json"]
 }
 ```
 
 A missing field must not be silently interpreted as PASS. If a backend cannot expose native format, synchronization, or transfer path, the evidence must say `unknown` or mark the row `INCONCLUSIVE`.
+
+GUI capture must verify the raw observed payload with the oracle during capture. Preview artifacts are for humans only and must not replace raw evidence.

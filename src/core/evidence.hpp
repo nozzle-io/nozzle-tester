@@ -7,6 +7,11 @@
 
 namespace nozzle_tester {
 
+struct evidence_artifact {
+    std::string role;
+    std::string path;
+};
+
 struct evidence_record {
     std::string role{"verify"};
     std::string backend{"cpu"};
@@ -23,6 +28,8 @@ struct evidence_record {
     std::string native_texture_format{"unknown"};
     std::string cpu_evidence_format;
     std::vector<std::string> artifact_paths;
+    std::vector<evidence_artifact> artifacts;
+    std::vector<std::string> covered_failure_reasons;
     verify_result verification;
 };
 

@@ -41,6 +41,10 @@ struct gui_state {
     int texture_width{0};
     int texture_height{0};
     std::vector<uint8_t> preview_bytes;
+    nozzle_tester::image_buffer last_observed_image;
+    nozzle_tester::test_case last_expected_test;
+    uint64_t last_observed_frame_count{0};
+    bool has_last_observed_image{false};
     std::string evidence_json;
     std::string verdict{"INCONCLUSIVE"};
     std::string status_text{"idle"};
@@ -59,6 +63,13 @@ const char *mode_names[] = {
     "sender",
     "receiver",
     "loopback",
+};
+
+const char *mode_role_names[] = {
+    "gui-preview",
+    "sender",
+    "receiver",
+    "loopback-receiver",
 };
 
 void glfw_error_callback(int error, const char *description) {
@@ -92,7 +103,7 @@ bool from_nozzle_format(NozzleTextureFormat format, nozzle_tester::tester_format
 
 nozzle_tester::test_case make_test_case(const gui_state &state) {
     nozzle_tester::test_case test{};
-    test.id = mode_names[state.mode_index < 0 ? 0 : state.mode_index % 4];
+    test.id = mode_role_names[state.mode_index < 0 ? 0 : state.mode_index % 4];
     test.width = state.width < 1 ? 1u : (uint32_t)state.width;
     test.height = state.height < 1 ? 1u : (uint32_t)state.height;
     test.frame_index = state.frame_index < 0 ? 0u : (uint64_t)state.frame_index;
@@ -123,11 +134,19 @@ void set_record(gui_state &state, nozzle_tester::evidence_record &record) {
     state.evidence_json = nozzle_tester::make_evidence_json(record);
 }
 
+void store_observed_image(gui_state &state, const nozzle_tester::image_buffer &image, const nozzle_tester::test_case &expected, uint64_t observed_frame_count) {
+    state.last_observed_image = image;
+    state.last_expected_test = expected;
+    state.last_observed_frame_count = observed_frame_count;
+    state.has_last_observed_image = true;
+}
+
 void update_pattern_preview(gui_state &state) {
     const nozzle_tester::test_case test = make_test_case(state);
     const nozzle_tester::image_buffer image = nozzle_tester::generate_pattern(test);
     const std::vector<uint8_t> preview = nozzle_tester::image_to_rgba8_preview(image);
     upload_preview_texture(state, image.width, image.height, preview);
+    store_observed_image(state, image, test, 1);
 
     nozzle_tester::evidence_record record{};
     record.role = "gui-preview";
@@ -227,11 +246,13 @@ bool publish_one_frame(gui_state &state) {
         state.last_error = "commit_frame_failed";
         return false;
     }
+    state.last_error.clear();
 
     const std::vector<uint8_t> preview = nozzle_tester::image_to_rgba8_preview(image);
     upload_preview_texture(state, image.width, image.height, preview);
     state.published_count += 1;
     state.frame_index = (int)test.frame_index;
+    store_observed_image(state, image, test, state.published_count);
 
     nozzle_tester::evidence_record record{};
     record.role = state.mode_index == 3 ? "loopback-sender" : "sender";
@@ -287,6 +308,7 @@ bool receive_one_frame(gui_state &state) {
         state.last_error = "copy_pixels_failed";
         return false;
     }
+    state.last_error.clear();
 
     nozzle_tester::image_buffer image{};
     image.width = info.width;
@@ -303,6 +325,7 @@ bool receive_one_frame(gui_state &state) {
     const nozzle_tester::verify_result verify = nozzle_tester::verify_pattern(image, expected);
 
     state.observed_count += 1;
+    store_observed_image(state, image, expected, state.observed_count);
     state.dropped_count = info.dropped_frame_count;
     state.frame_index = (int)info.frame_index;
     nozzle_tester::evidence_record record{};
@@ -317,6 +340,7 @@ bool receive_one_frame(gui_state &state) {
     record.verification = verify;
     if(record.verification.result == nozzle_tester::verdict::pass) {
         record.verification.stale_frame_ok = 1 < state.observed_count;
+        state.last_error.clear();
     }
     set_record(state, record);
     return verify.result == nozzle_tester::verdict::pass;
@@ -347,38 +371,46 @@ void tick_runtime(gui_state &state) {
 }
 
 void capture_evidence(gui_state &state) {
-    const std::string capture_path = "nozzle-tester-gui-capture.rgba";
+    const std::string raw_capture_path = "nozzle-tester-gui-capture.raw";
+    const std::string preview_capture_path = "nozzle-tester-gui-preview.rgba";
     const std::string evidence_path = "nozzle-tester-gui-evidence.json";
-    if(!state.preview_bytes.empty()) {
-        nozzle_tester::write_binary_file(capture_path, state.preview_bytes);
-    }
     nozzle_tester::evidence_record record{};
-    record.role = mode_names[state.mode_index < 0 ? 0 : state.mode_index % 4];
+    record.role = mode_role_names[state.mode_index < 0 ? 0 : state.mode_index % 4];
     record.backend = state.running ? "auto" : "cpu-preview";
     record.sender_name = state.channel_name;
     record.receiver_name = "nozzle-tester-gui";
-    record.test = make_test_case(state);
-    record.observed_width = state.texture_width < 1 ? 0u : (uint32_t)state.texture_width;
-    record.observed_height = state.texture_height < 1 ? 0u : (uint32_t)state.texture_height;
-    record.observed_frame_index = state.frame_index < 0 ? 0u : (uint64_t)state.frame_index;
-    record.observed_frame_count = state.observed_count != 0 ? state.observed_count : std::max<uint64_t>(1, state.published_count);
-    record.changed_across_observations = 1 < record.observed_frame_count;
-    record.artifact_paths.push_back(capture_path);
-    if(!state.last_error.empty()) {
+    if(state.has_last_observed_image) {
+        nozzle_tester::write_binary_file(raw_capture_path, state.last_observed_image.bytes);
+        record.test = state.last_expected_test;
+        record.observed_width = state.last_observed_image.width;
+        record.observed_height = state.last_observed_image.height;
+        record.observed_frame_index = state.last_expected_test.frame_index;
+        record.observed_frame_count = state.last_observed_frame_count;
+        record.changed_across_observations = 1 < state.last_observed_frame_count;
+        record.native_texture_format = nozzle_tester::format_to_string(state.last_observed_image.format);
+        record.cpu_evidence_format = nozzle_tester::format_to_string(state.last_observed_image.format);
+        record.verification = nozzle_tester::verify_pattern(state.last_observed_image, state.last_expected_test);
+        record.artifact_paths.push_back(raw_capture_path);
+        record.artifacts.push_back({"raw_capture", raw_capture_path});
+    } else {
+        record.test = make_test_case(state);
+        record.verification.result = nozzle_tester::verdict::fail;
+        record.verification.failure_reasons.push_back("missing_capture");
+    }
+    if(!state.preview_bytes.empty()) {
+        nozzle_tester::write_binary_file(preview_capture_path, state.preview_bytes);
+        record.artifact_paths.push_back(preview_capture_path);
+        record.artifacts.push_back({"preview_capture", preview_capture_path});
+    }
+    if(!state.last_error.empty() && record.verification.result == nozzle_tester::verdict::pass) {
         record.verification.result = nozzle_tester::verdict::fail;
         record.verification.failure_reasons.push_back(state.last_error);
-    } else {
-        record.verification.result = state.verdict == "PASS" ? nozzle_tester::verdict::pass : nozzle_tester::verdict::inconclusive;
     }
-    record.verification.dimensions_ok = record.observed_width == record.test.width && record.observed_height == record.test.height;
-    record.verification.orientation_ok = record.verification.result == nozzle_tester::verdict::pass;
-    record.verification.channel_order_ok = record.verification.result == nozzle_tester::verdict::pass;
-    record.verification.alpha_ok = record.verification.result == nozzle_tester::verdict::pass;
-    record.verification.stale_frame_ok = record.changed_across_observations;
     const std::string json = nozzle_tester::make_evidence_json(record);
     nozzle_tester::write_text_file(evidence_path, json);
     state.evidence_json = json;
-    state.status_text = "wrote " + evidence_path + " and " + capture_path;
+    state.verdict = nozzle_tester::verdict_to_string(record.verification.result);
+    state.status_text = "wrote " + evidence_path + ", " + raw_capture_path + ", and " + preview_capture_path;
 }
 
 } // namespace

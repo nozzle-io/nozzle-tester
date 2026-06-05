@@ -60,6 +60,7 @@ const char *format_to_string(tester_format format);
 bool parse_format(const std::string &text, tester_format &out_format);
 const char *verdict_to_string(verdict value);
 uint32_t bytes_per_pixel(tester_format format);
+uint64_t expected_byte_size(uint32_t width, uint32_t height, tester_format format);
 std::string make_case_id(const test_case &test);
 
 rgba_float expected_rgba(uint32_t x, uint32_t y, uint32_t width, uint32_t height, uint64_t frame_index);

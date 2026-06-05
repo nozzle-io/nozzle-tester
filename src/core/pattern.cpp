@@ -170,6 +170,19 @@ uint64_t count_mismatches(const image_buffer &observed, const test_case &expecte
     return mismatches;
 }
 
+image_buffer mutate_pixels(const image_buffer &source, rgba_float (*mutation)(rgba_float)) {
+    image_buffer result = source;
+    const uint32_t bpp = bytes_per_pixel(source.format);
+    for(uint32_t y = 0; y < source.height; y++) {
+        for(uint32_t x = 0; x < source.width; x++) {
+            const size_t offset = ((size_t)y * source.width + x) * bpp;
+            const rgba_float original = decode_pixel(source.bytes, offset, source.format);
+            encode_pixel(result.bytes, offset, source.format, mutation(original));
+        }
+    }
+    return result;
+}
+
 } // namespace
 
 const char *format_to_string(tester_format format) {
@@ -208,6 +221,10 @@ uint32_t bytes_per_pixel(tester_format format) {
         case tester_format::rgba32_float: return 16;
         default: return 0;
     }
+}
+
+uint64_t expected_byte_size(uint32_t width, uint32_t height, tester_format format) {
+    return (uint64_t)width * height * bytes_per_pixel(format);
 }
 
 std::string make_case_id(const test_case &test) {
@@ -323,6 +340,13 @@ verify_result verify_pattern(const image_buffer &observed, const test_case &expe
         return result;
     }
 
+    const uint64_t expected_size = expected_byte_size(observed.width, observed.height, observed.format);
+    if((uint64_t)observed.bytes.size() != expected_size) {
+        result.result = verdict::fail;
+        result.failure_reasons.push_back("byte_size_mismatch");
+        return result;
+    }
+
     const uint64_t pixel_count = (uint64_t)observed.width * observed.height;
     result.mismatch_count = count_mismatches(observed, expected, false, false, true);
     result.flipped_mismatch_count = count_mismatches(observed, expected, true, false, true);
@@ -377,24 +401,17 @@ image_buffer make_vertical_flip_fixture(const image_buffer &source) {
 }
 
 image_buffer make_rb_swap_fixture(const image_buffer &source) {
-    image_buffer result = source;
-    if(source.format != tester_format::rgba8_unorm && source.format != tester_format::bgra8_unorm) return result;
-    const uint32_t bpp = bytes_per_pixel(source.format);
-    for(size_t offset = 0; offset + bpp <= result.bytes.size(); offset += bpp) {
-        std::swap(result.bytes[offset + 0], result.bytes[offset + 2]);
-    }
-    return result;
+    return mutate_pixels(source, [](rgba_float value) {
+        std::swap(value.r, value.b);
+        return value;
+    });
 }
 
 image_buffer make_alpha_zero_fixture(const image_buffer &source) {
-    image_buffer result = source;
-    if(source.format == tester_format::rgba8_unorm || source.format == tester_format::bgra8_unorm) {
-        const uint32_t bpp = bytes_per_pixel(source.format);
-        for(size_t offset = 0; offset + bpp <= result.bytes.size(); offset += bpp) {
-            result.bytes[offset + 3] = 255;
-        }
-    }
-    return result;
+    return mutate_pixels(source, [](rgba_float value) {
+        value.a = 0.0f;
+        return value;
+    });
 }
 
 bool write_binary_file(const std::string &path, const std::vector<uint8_t> &bytes) {

@@ -73,9 +73,9 @@ The GUI provides:
 - mode selector: pattern preview, sender, receiver, loopback;
 - channel name, dimensions, format, timeout, and frame controls;
 - live preview, frame counters, FPS estimate, dropped-frame counter, and backend/path evidence fields;
-- `Capture evidence`, which writes `nozzle-tester-gui-evidence.json` plus `nozzle-tester-gui-capture.rgba`.
+- `Capture evidence`, which re-runs the oracle on the last raw observed payload and writes `nozzle-tester-gui-evidence.json`, `nozzle-tester-gui-capture.raw`, and `nozzle-tester-gui-preview.rgba`.
 
-The GUI is intentionally functional rather than polished. It must not be used as a screenshot-only oracle: report the exported JSON and captured-frame artifact.
+The GUI is intentionally functional rather than polished. It must not be used as a screenshot-only oracle: report the exported JSON, raw captured payload, and optional preview artifact.
 
 ## Evidence boundary
 

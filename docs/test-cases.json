@@ -8,6 +8,14 @@
     { "id": "small-16x16-rgba8", "width": 16, "height": 16, "format": "rgba8_unorm" },
     { "id": "smoke-320x240-rgba8", "width": 320, "height": 240, "format": "rgba8_unorm" },
     { "id": "odd-641x479-rgba8", "width": 641, "height": 479, "format": "rgba8_unorm" },
-    { "id": "perf-3840x2160-rgba8", "width": 3840, "height": 2160, "format": "rgba8_unorm", "category": "performance" }
+    { "id": "odd-641x479-bgra8", "width": 641, "height": 479, "format": "bgra8_unorm" },
+    { "id": "odd-641x479-rgba16f", "width": 641, "height": 479, "format": "rgba16_float" },
+    { "id": "odd-641x479-rgba32f", "width": 641, "height": 479, "format": "rgba32_float" },
+    { "id": "resize-641x479-rgba8", "width": 641, "height": 479, "format": "rgba8_unorm", "category": "resize-transition" },
+    { "id": "resize-479x641-rgba8", "width": 479, "height": 641, "format": "rgba8_unorm", "category": "resize-transition" },
+    { "id": "perf-3840x2160-rgba8", "width": 3840, "height": 2160, "format": "rgba8_unorm", "category": "performance" },
+    { "id": "perf-3840x2160-bgra8", "width": 3840, "height": 2160, "format": "bgra8_unorm", "category": "performance" },
+    { "id": "perf-3840x2160-rgba16f", "width": 3840, "height": 2160, "format": "rgba16_float", "category": "performance" },
+    { "id": "perf-3840x2160-rgba32f", "width": 3840, "height": 2160, "format": "rgba32_float", "category": "performance" }
   ]
 }
