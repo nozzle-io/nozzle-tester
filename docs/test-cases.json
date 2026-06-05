@@ -1,0 +1,13 @@
+{
+  "schema_version": "0.1.0",
+  "cases": [
+    { "id": "edge-1x1-rgba8", "width": 1, "height": 1, "format": "rgba8_unorm" },
+    { "id": "edge-2x2-rgba8", "width": 2, "height": 2, "format": "rgba8_unorm" },
+    { "id": "edge-3x2-rgba8", "width": 3, "height": 2, "format": "rgba8_unorm" },
+    { "id": "edge-2x3-rgba8", "width": 2, "height": 3, "format": "rgba8_unorm" },
+    { "id": "small-16x16-rgba8", "width": 16, "height": 16, "format": "rgba8_unorm" },
+    { "id": "smoke-320x240-rgba8", "width": 320, "height": 240, "format": "rgba8_unorm" },
+    { "id": "odd-641x479-rgba8", "width": 641, "height": 479, "format": "rgba8_unorm" },
+    { "id": "perf-3840x2160-rgba8", "width": 3840, "height": 2160, "format": "rgba8_unorm", "category": "performance" }
+  ]
+}

@@ -1,0 +1,9 @@
+build/
+build-*/
+.DS_Store
+*.user
+*.suo
+*.swp
+nozzle-tester-self-test.json
+*.rgba
+*.raw

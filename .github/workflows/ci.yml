@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main, stable]
+  pull_request:
+    branches: [main, stable]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libdrm-dev libgbm-dev libegl1-mesa-dev libgl1-mesa-dev xorg-dev libglu1-mesa-dev
+
+      - name: Configure
+        run: cmake -S . -B build -DNOZZLE_TESTER_BUILD_GUI=ON -DNOZZLE_TESTER_BUILD_TESTS=ON
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Test
+        run: ctest --test-dir build --build-config Release --output-on-failure
+
+      - name: Generate evidence fixture
+        shell: bash
+        run: |
+          if [ -x build/nozzle-tester-cli ]; then
+            CLI=build/nozzle-tester-cli
+          else
+            CLI=build/Release/nozzle-tester-cli.exe
+          fi
+          "$CLI" self-test --evidence build/nozzle-tester-self-test.json
+          test -s build/nozzle-tester-self-test.json
+
+      - name: Upload evidence fixture
+        uses: actions/upload-artifact@v4
+        with:
+          name: nozzle-tester-self-test-${{ matrix.os }}
+          path: build/nozzle-tester-self-test.json
+          if-no-files-found: error
