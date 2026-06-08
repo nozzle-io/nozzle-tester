@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -284,10 +285,46 @@ nozzle_tester::image_buffer generate_sender_image(const cli_options &options, ui
     return nozzle_tester::generate_pattern(frame_test);
 }
 
-bool write_image_to_mapping(const nozzle_tester::image_buffer &image, const NozzleMappedPixels &pixels) {
+uint32_t nozzle_format_bytes_per_pixel(NozzleTextureFormat format) {
+    switch(format) {
+        case NOZZLE_FORMAT_RGBA8_UNORM: return 4u;
+        case NOZZLE_FORMAT_BGRA8_UNORM: return 4u;
+        case NOZZLE_FORMAT_RGBA16_FLOAT: return 8u;
+        case NOZZLE_FORMAT_RGBA32_FLOAT: return 16u;
+        default: return 0u;
+    }
+}
+
+bool safe_absolute_stride(int64_t stride, uint64_t &out_stride) {
+    if(stride == std::numeric_limits<int64_t>::min()) return false;
+    if(stride < 0) {
+        out_stride = (uint64_t)(-stride);
+    } else {
+        out_stride = (uint64_t)stride;
+    }
+    return true;
+}
+
+bool validate_mapping_row_bounds(const nozzle_tester::image_buffer &image, const NozzleMappedPixels &pixels, uint32_t row_bytes) {
     if(pixels.data == nullptr || image.width != pixels.width || image.height != pixels.height) return false;
+    if(image.width == 0u || image.height == 0u || row_bytes == 0u) return false;
+    uint64_t absolute_stride = 0u;
+    if(!safe_absolute_stride(pixels.row_stride_bytes, absolute_stride)) return false;
+    if(absolute_stride < row_bytes) return false;
+    const uint64_t last_row_offset = (uint64_t)(image.height - 1u) * absolute_stride;
+    if((uint64_t)std::numeric_limits<size_t>::max() - (uint64_t)row_bytes < last_row_offset) return false;
+    return true;
+}
+
+bool write_image_to_mapping(const nozzle_tester::image_buffer &image, const NozzleMappedPixels &pixels) {
+    const uint32_t storage_bpp = nozzle_format_bytes_per_pixel(pixels.format);
+    if(storage_bpp == 0u) return false;
+    const uint32_t storage_row_bytes = image.width * storage_bpp;
+    if(!validate_mapping_row_bounds(image, pixels, storage_row_bytes)) return false;
+
     if(pixels.format == to_nozzle_format(image.format)) {
         const uint32_t row_bytes = image.width * nozzle_tester::bytes_per_pixel(image.format);
+        if(!validate_mapping_row_bounds(image, pixels, row_bytes)) return false;
         uint8_t *target = (uint8_t*)pixels.data;
         for(uint32_t y = 0; y < image.height; y++) {
             const uint32_t source_y = pixels.origin == NOZZLE_ORIGIN_BOTTOM_LEFT ? image.height - 1u - y : y;
@@ -313,6 +350,26 @@ bool write_image_to_mapping(const nozzle_tester::image_buffer &image, const Nozz
             destination[2u] = source[0u];
             destination[3u] = source[3u];
         }
+    }
+    return true;
+}
+
+bool read_mapping_storage_rgba8(const NozzleMappedPixels &pixels, uint32_t x, uint32_t y, uint8_t rgba[4]) {
+    if(pixels.data == nullptr || pixels.width <= x || pixels.height <= y) return false;
+    if(pixels.format != NOZZLE_FORMAT_RGBA8_UNORM && pixels.format != NOZZLE_FORMAT_BGRA8_UNORM) return false;
+    const uint32_t mapped_y = pixels.origin == NOZZLE_ORIGIN_BOTTOM_LEFT ? pixels.height - 1u - y : y;
+    const uint8_t *row = (const uint8_t*)pixels.data + (int64_t)mapped_y * pixels.row_stride_bytes;
+    const uint8_t *source = row + (size_t)x * 4u;
+    if(pixels.format == NOZZLE_FORMAT_BGRA8_UNORM) {
+        rgba[0u] = source[2u];
+        rgba[1u] = source[1u];
+        rgba[2u] = source[0u];
+        rgba[3u] = source[3u];
+    } else {
+        rgba[0u] = source[0u];
+        rgba[1u] = source[1u];
+        rgba[2u] = source[2u];
+        rgba[3u] = source[3u];
     }
     return true;
 }
@@ -348,7 +405,7 @@ void log_sender_mapping_samples(const cli_options &options, const nozzle_tester:
         const size_t offset = ((size_t)item.y * image.width + item.x) * 4u;
         std::fprintf(
             stderr,
-            "sender_mapping logical_%s x=%u y=%u rgba=(%u,%u,%u,%u)\n",
+            "sender_mapping intended_%s x=%u y=%u rgba=(%u,%u,%u,%u)\n",
             item.name,
             item.x,
             item.y,
@@ -357,6 +414,20 @@ void log_sender_mapping_samples(const cli_options &options, const nozzle_tester:
             image.bytes[offset + 2u],
             image.bytes[offset + 3u]
         );
+        uint8_t rgba[4]{};
+        if(read_mapping_storage_rgba8(pixels, item.x, item.y, rgba)) {
+            std::fprintf(
+                stderr,
+                "sender_mapping storage_%s x=%u y=%u rgba=(%u,%u,%u,%u)\n",
+                item.name,
+                item.x,
+                item.y,
+                rgba[0u],
+                rgba[1u],
+                rgba[2u],
+                rgba[3u]
+            );
+        }
     }
 }
 
@@ -562,9 +633,6 @@ int run_sender(const cli_options &options) {
         }
 
         const nozzle_tester::image_buffer image = generate_sender_image(options, frame);
-        if(frame == 0u) {
-            log_sender_mapping_samples(options, image, pixels);
-        }
         if(!write_image_to_mapping(image, pixels)) {
             std::fprintf(stderr, "write_image_to_mapping_failed: storage format %s for requested %s\n", texture_format_name(pixels.format), nozzle_tester::format_to_string(options.format));
             publish_failure_reason = std::string("write_image_to_mapping_failed:") + texture_format_name(pixels.format);
@@ -572,6 +640,9 @@ int run_sender(const cli_options &options) {
             nozzle_sender_discard_frame(sender, writable);
             nozzle_frame_release(writable);
             break;
+        }
+        if(frame == 0u) {
+            log_sender_mapping_samples(options, image, pixels);
         }
 
         nozzle_pixel_mapping_unlock(&mapping);
@@ -600,10 +671,8 @@ int run_sender(const cli_options &options) {
     if(record.verification.result != nozzle_tester::verdict::pass) {
         record.verification.failure_reasons.push_back(publish_failure_reason.empty() ? "publish_frame_failed" : publish_failure_reason);
     }
-    record.verification.dimensions_ok = true;
-    record.verification.orientation_ok = true;
-    record.verification.channel_order_ok = true;
-    record.verification.alpha_ok = true;
+    record.verification.dimensions_ok = options.width == record.observed_width && options.height == record.observed_height;
+    record.verification.format_ok = true;
     record.verification.stale_frame_ok = 1 < published;
     emit_evidence(record, options.evidence_path);
     return record.verification.result == nozzle_tester::verdict::pass ? 0 : 1;
