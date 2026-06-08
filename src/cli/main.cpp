@@ -77,6 +77,24 @@ const char *backend_name(NozzleBackendType backend) {
     }
 }
 
+const char *texture_format_name(NozzleTextureFormat format) {
+    switch(format) {
+        case NOZZLE_FORMAT_RGBA8_UNORM: return "rgba8_unorm";
+        case NOZZLE_FORMAT_BGRA8_UNORM: return "bgra8_unorm";
+        case NOZZLE_FORMAT_RGBA16_FLOAT: return "rgba16_float";
+        case NOZZLE_FORMAT_RGBA32_FLOAT: return "rgba32_float";
+        default: return "unknown";
+    }
+}
+
+const char *origin_name(NozzleTextureOrigin origin) {
+    switch(origin) {
+        case NOZZLE_ORIGIN_TOP_LEFT: return "top_left";
+        case NOZZLE_ORIGIN_BOTTOM_LEFT: return "bottom_left";
+        default: return "unknown";
+    }
+}
+
 bool parse_u32(const char *text, uint32_t &out_value) {
     char *end = nullptr;
     const unsigned long value = std::strtoul(text, &end, 10);
@@ -264,6 +282,82 @@ nozzle_tester::image_buffer generate_sender_image(const cli_options &options, ui
         return generate_juce_quadrants(frame_test);
     }
     return nozzle_tester::generate_pattern(frame_test);
+}
+
+bool write_image_to_mapping(const nozzle_tester::image_buffer &image, const NozzleMappedPixels &pixels) {
+    if(pixels.data == nullptr || image.width != pixels.width || image.height != pixels.height) return false;
+    if(pixels.format == to_nozzle_format(image.format)) {
+        const uint32_t row_bytes = image.width * nozzle_tester::bytes_per_pixel(image.format);
+        uint8_t *target = (uint8_t*)pixels.data;
+        for(uint32_t y = 0; y < image.height; y++) {
+            const uint32_t source_y = pixels.origin == NOZZLE_ORIGIN_BOTTOM_LEFT ? image.height - 1u - y : y;
+            std::memcpy(target + (int64_t)y * pixels.row_stride_bytes, image.bytes.data() + (size_t)source_y * row_bytes, row_bytes);
+        }
+        return true;
+    }
+
+    if(image.format != nozzle_tester::tester_format::rgba8_unorm || pixels.format != NOZZLE_FORMAT_BGRA8_UNORM) {
+        return false;
+    }
+
+    uint8_t *target = (uint8_t*)pixels.data;
+    for(uint32_t y = 0; y < image.height; y++) {
+        const uint32_t source_y = pixels.origin == NOZZLE_ORIGIN_BOTTOM_LEFT ? image.height - 1u - y : y;
+        const uint8_t *source_row = image.bytes.data() + (size_t)source_y * image.width * 4u;
+        uint8_t *target_row = target + (int64_t)y * pixels.row_stride_bytes;
+        for(uint32_t x = 0; x < image.width; x++) {
+            const uint8_t *source = source_row + (size_t)x * 4u;
+            uint8_t *destination = target_row + (size_t)x * 4u;
+            destination[0u] = source[2u];
+            destination[1u] = source[1u];
+            destination[2u] = source[0u];
+            destination[3u] = source[3u];
+        }
+    }
+    return true;
+}
+
+void log_sender_mapping_samples(const cli_options &options, const nozzle_tester::image_buffer &image, const NozzleMappedPixels &pixels) {
+    if(image.width == 0 || image.height == 0 || image.bytes.empty()) return;
+    if(image.format != nozzle_tester::tester_format::rgba8_unorm) return;
+    const uint32_t left_x = image.width / 8u;
+    const uint32_t right_x = image.width - 1u - image.width / 8u;
+    const uint32_t top_y = image.height / 8u;
+    const uint32_t bottom_y = image.height - 1u - image.height / 8u;
+    struct sample {
+        const char *name;
+        uint32_t x;
+        uint32_t y;
+    };
+    const sample samples[] = {
+        {"TL", left_x, top_y},
+        {"TR", right_x, top_y},
+        {"BL", left_x, bottom_y},
+        {"BR", right_x, bottom_y},
+    };
+    std::fprintf(
+        stderr,
+        "sender_mapping requested_origin=top_left returned_origin=%s row_stride=%lld requested_format=%s storage_format=%s pattern=%s\n",
+        origin_name(pixels.origin),
+        (long long)pixels.row_stride_bytes,
+        nozzle_tester::format_to_string(options.format),
+        texture_format_name(pixels.format),
+        options.sender_pattern.c_str()
+    );
+    for(const sample &item : samples) {
+        const size_t offset = ((size_t)item.y * image.width + item.x) * 4u;
+        std::fprintf(
+            stderr,
+            "sender_mapping logical_%s x=%u y=%u rgba=(%u,%u,%u,%u)\n",
+            item.name,
+            item.x,
+            item.y,
+            image.bytes[offset + 0u],
+            image.bytes[offset + 1u],
+            image.bytes[offset + 2u],
+            image.bytes[offset + 3u]
+        );
+    }
 }
 
 int run_pattern(const cli_options &options) {
@@ -468,12 +562,16 @@ int run_sender(const cli_options &options) {
         }
 
         const nozzle_tester::image_buffer image = generate_sender_image(options, frame);
-        const uint32_t row_bytes = options.width * nozzle_tester::bytes_per_pixel(options.format);
-        uint8_t *target = (uint8_t*)pixels.data;
-        for(uint32_t y = 0; y < options.height; y++) {
-            const bool bottom_to_top_mapping = pixels.origin == NOZZLE_ORIGIN_BOTTOM_LEFT;
-            const uint32_t source_y = bottom_to_top_mapping ? options.height - 1u - y : y;
-            std::memcpy(target + (int64_t)y * pixels.row_stride_bytes, image.bytes.data() + (size_t)source_y * row_bytes, row_bytes);
+        if(frame == 0u) {
+            log_sender_mapping_samples(options, image, pixels);
+        }
+        if(!write_image_to_mapping(image, pixels)) {
+            std::fprintf(stderr, "write_image_to_mapping_failed: storage format %s for requested %s\n", texture_format_name(pixels.format), nozzle_tester::format_to_string(options.format));
+            publish_failure_reason = std::string("write_image_to_mapping_failed:") + texture_format_name(pixels.format);
+            nozzle_pixel_mapping_unlock(&mapping);
+            nozzle_sender_discard_frame(sender, writable);
+            nozzle_frame_release(writable);
+            break;
         }
 
         nozzle_pixel_mapping_unlock(&mapping);
