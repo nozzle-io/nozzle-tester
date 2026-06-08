@@ -3,6 +3,7 @@
 
 #include <nozzle/nozzle_c.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -30,6 +31,7 @@ struct cli_options {
     uint32_t timeout_ms{2000};
     uint32_t delay_ms{16};
     uint32_t hold_ms{0};
+    std::string sender_pattern{"nozzle-tester"};
 };
 
 void print_usage(const char *program) {
@@ -40,6 +42,7 @@ void print_usage(const char *program) {
     std::fprintf(stderr, "  --output PATH --input PATH --evidence PATH\n");
     std::fprintf(stderr, "Sender/receiver options:\n");
     std::fprintf(stderr, "  --name NAME --frames N --timeout-ms N --delay-ms N --hold-ms N\n");
+    std::fprintf(stderr, "  --sender-pattern nozzle-tester|juce-quadrants\n");
     std::fprintf(stderr, "Discovery options:\n");
     std::fprintf(stderr, "  discover [--name NAME] [--timeout-ms N]\n");
 }
@@ -153,6 +156,14 @@ bool parse_options(int argc, char **argv, cli_options &options) {
             if(value == nullptr) return false;
             options.sender_name = value;
             options.sender_name_provided = true;
+        } else if(std::strcmp(arg, "--sender-pattern") == 0) {
+            const char *value = require_value(arg);
+            if(value == nullptr) return false;
+            if(std::strcmp(value, "nozzle-tester") != 0 && std::strcmp(value, "juce-quadrants") != 0) {
+                std::fprintf(stderr, "invalid sender pattern: %s\n", value);
+                return false;
+            }
+            options.sender_pattern = value;
         } else if(std::strcmp(arg, "--help") == 0) {
             return false;
         } else {
@@ -202,6 +213,57 @@ nozzle_tester::test_case make_test(const cli_options &options) {
     test.format = options.format;
     test.frame_index = options.frame_index;
     return test;
+}
+
+nozzle_tester::image_buffer generate_juce_quadrants(const nozzle_tester::test_case &test) {
+    nozzle_tester::image_buffer image{};
+    image.width = test.width;
+    image.height = test.height;
+    image.format = test.format;
+    const uint32_t bpp = nozzle_tester::bytes_per_pixel(test.format);
+    image.bytes.resize((size_t)test.width * test.height * bpp);
+    if(test.format != nozzle_tester::tester_format::rgba8_unorm) {
+        return image;
+    }
+    const uint32_t marker_width = std::max<uint32_t>(1u, test.width / 4u);
+    const uint32_t marker_height = std::max<uint32_t>(1u, test.height / 4u);
+    for(uint32_t y = 0; y < test.height; y++) {
+        for(uint32_t x = 0; x < test.width; x++) {
+            const size_t offset = ((size_t)y * test.width + x) * 4u;
+            const uint8_t base = (uint8_t)((x + y + (uint32_t)test.frame_index) & 0xffu);
+            image.bytes[offset + 0u] = base;
+            image.bytes[offset + 1u] = (uint8_t)((x + (uint32_t)test.frame_index) & 0xffu);
+            image.bytes[offset + 2u] = (uint8_t)((test.frame_index * 7u) & 0xffu);
+            image.bytes[offset + 3u] = 255u;
+            if(x < marker_width && y < marker_height) {
+                image.bytes[offset + 0u] = 255u;
+                image.bytes[offset + 1u] = 0u;
+                image.bytes[offset + 2u] = 0u;
+            } else if(test.width - marker_width <= x && y < marker_height) {
+                image.bytes[offset + 0u] = 0u;
+                image.bytes[offset + 1u] = 255u;
+                image.bytes[offset + 2u] = 0u;
+            } else if(x < marker_width && test.height - marker_height <= y) {
+                image.bytes[offset + 0u] = 0u;
+                image.bytes[offset + 1u] = 0u;
+                image.bytes[offset + 2u] = 255u;
+            } else if(test.width - marker_width <= x && test.height - marker_height <= y) {
+                image.bytes[offset + 0u] = 255u;
+                image.bytes[offset + 1u] = 255u;
+                image.bytes[offset + 2u] = 255u;
+            }
+        }
+    }
+    return image;
+}
+
+nozzle_tester::image_buffer generate_sender_image(const cli_options &options, uint32_t frame_index) {
+    nozzle_tester::test_case frame_test = make_test(options);
+    frame_test.frame_index = frame_index;
+    if(options.sender_pattern == "juce-quadrants") {
+        return generate_juce_quadrants(frame_test);
+    }
+    return nozzle_tester::generate_pattern(frame_test);
 }
 
 int run_pattern(const cli_options &options) {
@@ -343,6 +405,19 @@ int run_self_test(const cli_options &options) {
 }
 
 int run_sender(const cli_options &options) {
+    if(options.sender_pattern == "juce-quadrants" && options.format != nozzle_tester::tester_format::rgba8_unorm) {
+        nozzle_tester::evidence_record record{};
+        record.role = "sender";
+        record.backend = "auto";
+        record.sender_name = options.sender_name;
+        record.test = make_test(options);
+        record.verification.result = nozzle_tester::verdict::fail;
+        record.verification.failure_reasons.push_back("juce_quadrants_requires_rgba8_unorm");
+        emit_evidence(record, options.evidence_path);
+        std::fprintf(stderr, "juce-quadrants sender pattern requires rgba8_unorm\n");
+        return 1;
+    }
+
     NozzleSenderDesc desc{};
     desc.name = options.sender_name.c_str();
     desc.application_name = "nozzle-tester";
@@ -392,13 +467,13 @@ int run_sender(const cli_options &options) {
             break;
         }
 
-        nozzle_tester::test_case frame_test = make_test(options);
-        frame_test.frame_index = frame;
-        const nozzle_tester::image_buffer image = nozzle_tester::generate_pattern(frame_test);
+        const nozzle_tester::image_buffer image = generate_sender_image(options, frame);
         const uint32_t row_bytes = options.width * nozzle_tester::bytes_per_pixel(options.format);
         uint8_t *target = (uint8_t*)pixels.data;
         for(uint32_t y = 0; y < options.height; y++) {
-            std::memcpy(target + (int64_t)y * pixels.row_stride_bytes, image.bytes.data() + (size_t)y * row_bytes, row_bytes);
+            const bool bottom_to_top_mapping = pixels.origin == NOZZLE_ORIGIN_BOTTOM_LEFT;
+            const uint32_t source_y = bottom_to_top_mapping ? options.height - 1u - y : y;
+            std::memcpy(target + (int64_t)y * pixels.row_stride_bytes, image.bytes.data() + (size_t)source_y * row_bytes, row_bytes);
         }
 
         nozzle_pixel_mapping_unlock(&mapping);
