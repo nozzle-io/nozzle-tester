@@ -22,6 +22,8 @@ ctest --test-dir build --output-on-failure
 
 Linux GUI builds require OpenGL/X11 development packages for GLFW plus nozzle's Linux backend dependencies.
 
+The published Linux x64 build targets **x86-64-v2** (no AVX, AVX2, FMA or F16C). CI sets this explicitly and verifies the binaries with `deps/nozzle/scripts/check_x86_64_isa.sh`.
+
 ## CLI examples
 
 Generate a hostile non-symmetric pattern:
