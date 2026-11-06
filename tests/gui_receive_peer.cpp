@@ -147,6 +147,7 @@ bool run_verdict_case(NozzleTextureFormat requested, uint32_t width) {
     nozzle_tester::test_case source{};
     source.width = width;
     source.height = 33;
+    source.frame_index = 1; // Core's first successful commit is frame 1.
     if(!nozzle_tester::gui_received_format(mapped.format, source.format)) return false;
     const auto pattern = nozzle_tester::generate_pattern(source);
     const size_t row_bytes = width * nozzle_tester::bytes_per_pixel(source.format);

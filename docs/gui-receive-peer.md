@@ -25,6 +25,15 @@ and low float32 bits. A real R8 frame verifies explicit unsupported rejection.
 Logs show requested/native/frame-info/semantic/copied formats and native/copied
 strides. Missing Metal or setup failures fail, with no SKIP.
 
+The verdict regression additionally generates a pattern in actual mapped storage
+at 65x33/641x33, publishes it as frame 1 (the core's first committed index), and
+calls the real `verify_pattern` with the requested format and received frame index,
+as GUI/CLI receivers do. It asserts PASS and exact copied bytes for all four
+requested formats. This failing-first extension leaves the production comparison
+unchanged: CI must establish whether requested RGBA8 is rejected as BGRA8 storage.
+These additional cases use the pattern generator; the original 17 copy cases do
+not. Copy agreement alone does not establish user-facing verdict correctness.
+
 This is an investigation baseline, not a claimed layout fix. If the existing
 construction passes, report the bounded agreement instead of inventing a failing
 reproduction. If it fails numerically, retain that CI evidence before any repair.
