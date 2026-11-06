@@ -267,7 +267,7 @@ nozzle_tester::image_buffer generate_juce_quadrants(const nozzle_tester::test_ca
     return image;
 }
 
-nozzle_tester::image_buffer generate_sender_image(const cli_options &options, uint32_t frame_index) {
+nozzle_tester::image_buffer generate_sender_image(const cli_options &options, uint64_t frame_index) {
     nozzle_tester::test_case frame_test = make_test(options);
     frame_test.frame_index = frame_index;
     if(options.sender_pattern == "juce-quadrants") {
@@ -602,6 +602,7 @@ int run_sender(const cli_options &options) {
     }
 
     uint32_t published = 0;
+    uint64_t last_payload_index = 0;
     std::string publish_failure_reason;
     for(uint32_t frame = 0; frame < options.frames; frame++) {
         NozzleFrame *writable = nullptr;
@@ -623,7 +624,8 @@ int run_sender(const cli_options &options) {
             break;
         }
 
-        const nozzle_tester::image_buffer image = generate_sender_image(options, frame);
+        const uint64_t payload_index = frame;
+        const nozzle_tester::image_buffer image = generate_sender_image(options, payload_index);
         if(!write_image_to_mapping(image, pixels)) {
             std::fprintf(stderr, "write_image_to_mapping_failed: storage format %s for requested %s\n", texture_format_name(pixels.format), nozzle_tester::format_to_string(options.format));
             publish_failure_reason = std::string("write_image_to_mapping_failed:") + texture_format_name(pixels.format);
@@ -645,18 +647,23 @@ int run_sender(const cli_options &options) {
             break;
         }
         published += 1;
+        last_payload_index = payload_index;
         if(0 < options.delay_ms) {
             std::this_thread::sleep_for(std::chrono::milliseconds(options.delay_ms));
         }
     }
 
+    if(published == options.frames && published != 0) {
+        std::fprintf(stderr, "sender_ready published_count=%u payload_frame_index=%llu\n",
+            published, (unsigned long long)last_payload_index);
+    }
     if(0 < options.hold_ms) {
         std::this_thread::sleep_for(std::chrono::milliseconds(options.hold_ms));
     }
 
     nozzle_sender_destroy(sender);
     record.observed_frame_count = published;
-    record.observed_frame_index = published == 0 ? 0 : published - 1u;
+    record.observed_frame_index = last_payload_index;
     record.changed_across_observations = 1 < published;
     record.verification.result = published == options.frames ? nozzle_tester::verdict::pass : nozzle_tester::verdict::fail;
     if(record.verification.result != nozzle_tester::verdict::pass) {
