@@ -105,8 +105,8 @@ void record_gui_received(gui_evidence_state &state, const image_buffer &image,
 }
 
 void record_gui_publication_failure(gui_evidence_state &state, const test_case &test,
-    const std::string &channel, uint64_t published_count, const std::string &error) {
-    record_gui_generated(state, {}, test, channel, "sender", published_count);
+    const std::string &channel, const std::string &role, uint64_t published_count, const std::string &error) {
+    record_gui_generated(state, {}, test, channel, role, published_count);
     state.current.publication_succeeded = false;
     state.current.evidence.verification.failure_reasons.push_back(error);
     display(state, state.current);

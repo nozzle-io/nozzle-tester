@@ -34,7 +34,7 @@ void record_gui_generated(gui_evidence_state &state, const image_buffer &image,
 void record_gui_received(gui_evidence_state &state, const image_buffer &image,
     evidence_record record, const std::string &channel);
 void record_gui_publication_failure(gui_evidence_state &state, const test_case &test,
-    const std::string &channel, uint64_t published_count, const std::string &error);
+    const std::string &channel, const std::string &role, uint64_t published_count, const std::string &error);
 void clear_gui_observation(gui_evidence_state &state);
 gui_capture_result capture_gui_evidence(gui_evidence_state &state,
     const std::string &prefix = "nozzle-tester-gui");

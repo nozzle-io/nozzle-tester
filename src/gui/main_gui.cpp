@@ -200,7 +200,8 @@ bool publish_one_frame(gui_state &state) {
             ? "writable_mapping_failed: invalid mapped pixels"
             : error_text(publication.failed_stage, publication.error);
         nozzle_tester::record_gui_publication_failure(state.evidence, publication.test,
-            state.runtime_channel, state.published_count, state.last_error);
+            state.runtime_channel, state.runtime_loopback ? "loopback-sender" : "sender",
+            state.published_count, state.last_error);
         return false;
     }
     const auto &test = publication.test;

@@ -63,6 +63,7 @@ def main():
               and len(json_failed["record"]["artifacts"]) == 2)
         publication = cases["publication_failure"]["record"]
         check("publication_failure", publication["publication"] == {"succeeded": False, "published_count": 2}
+              and publication["role"] == "loopback-sender" and publication["sender_name"] == "failed-sender"
               and publication["verdict"] == "INCONCLUSIVE"
               and all(v == "INCONCLUSIVE" for v in publication["checks"].values()))
         for name in ("bad_received", "bad_capture"):

@@ -68,7 +68,7 @@ int main() {
     emit("json_write_failure", state, capture.success);
 
     clear_gui_observation(state);
-    record_gui_publication_failure(state, test, "failed-sender", 2, "commit_failed");
+    record_gui_publication_failure(state, test, "failed-sender", "loopback-sender", 2, "commit_failed");
     emit("publication_failure", state);
 
     receive(state, make_rb_swap_fixture(image), test);
