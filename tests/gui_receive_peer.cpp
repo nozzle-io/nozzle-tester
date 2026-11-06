@@ -129,6 +129,59 @@ bool run_case(NozzleTextureFormat requested, uint32_t width, bool bottom) {
     }
     return true;
 }
+
+bool run_verdict_case(NozzleTextureFormat requested, uint32_t width) {
+    resources peer;
+    const std::string name = "v230-" + std::to_string(getpid()) + "-" + std::to_string(requested)
+        + "-" + std::to_string(width);
+    NozzleSenderDesc desc{};
+    desc.name = name.c_str();
+    desc.ring_buffer_size = 3;
+    desc.fallback_flags_valid = 1;
+    desc.fallback_flags = NOZZLE_FALLBACK_SAFE_DEFAULTS;
+    if(!ok(nozzle_sender_create(&desc, &peer.sender), "verdict sender create") ||
+       !ok(nozzle_sender_acquire_writable_frame(peer.sender, width, 33, requested, &peer.write), "verdict write acquire")) return false;
+    NozzleMappedPixels mapped{};
+    if(!ok(nozzle_frame_lock_writable_pixels_mapping_with_origin(peer.write, NOZZLE_ORIGIN_TOP_LEFT,
+        &peer.mapping, &mapped), "verdict write map")) return false;
+    nozzle_tester::test_case source{};
+    source.width = width;
+    source.height = 33;
+    if(!nozzle_tester::gui_received_format(mapped.format, source.format)) return false;
+    const auto pattern = nozzle_tester::generate_pattern(source);
+    const size_t row_bytes = width * nozzle_tester::bytes_per_pixel(source.format);
+    if(!mapped.data || mapped.width != width || mapped.height != source.height ||
+       mapped.row_stride_bytes < static_cast<int64_t>(row_bytes)) return false;
+    // Generate in the actual mapped layout, independently of the GUI sender.
+    for(uint32_t y = 0; y < source.height; ++y) {
+        std::memcpy(static_cast<uint8_t *>(mapped.data) + y * mapped.row_stride_bytes,
+            pattern.bytes.data() + y * row_bytes, row_bytes);
+    }
+    if(!ok(nozzle_pixel_mapping_unlock_checked(&peer.mapping), "verdict write unlock") ||
+       !ok(nozzle_sender_commit_frame(peer.sender, peer.write), "verdict commit")) return false;
+    peer.committed = true;
+    NozzleReceiverDesc receiver_desc{};
+    receiver_desc.name = name.c_str();
+    NozzleAcquireDesc acquire{3000};
+    if(!ok(nozzle_receiver_create(&receiver_desc, &peer.receiver), "verdict receiver create") ||
+       !ok(nozzle_receiver_acquire_frame(peer.receiver, &acquire, &peer.read), "verdict read acquire")) return false;
+    NozzleFrameInfo info{};
+    nozzle_tester::image_buffer image{};
+    NozzleMappedPixels copied{};
+    if(!ok(nozzle_frame_get_info(peer.read, &info), "verdict frame info") ||
+       !ok(nozzle_tester::copy_gui_received_image(peer.read, info, image, copied), "verdict copy")) return false;
+    nozzle_tester::test_case expected = source;
+    if(!nozzle_tester::gui_received_format(requested, expected.format)) return false;
+    expected.frame_index = info.frame_index; // Same as the GUI and CLI receiver.
+    const auto result = nozzle_tester::verify_pattern(image, expected);
+    std::printf("GUI_RECEIVE_VERDICT requested=%d storage=%d semantic=%d width=%u frame=%llu result=%s reasons=",
+        (int)requested, (int)copied.format, (int)info.semantic_format, width,
+        (unsigned long long)info.frame_index, nozzle_tester::verdict_to_string(result.result));
+    for(const auto &reason : result.failure_reasons) std::printf("%s,", reason.c_str());
+    std::printf("\n");
+    return image.bytes == pattern.bytes && image.format == source.format && info.frame_index == source.frame_index &&
+        result.result == nozzle_tester::verdict::pass;
+}
 } // namespace
 
 int main() {
@@ -146,6 +199,12 @@ int main() {
     const bool unsupported = run_case(NOZZLE_FORMAT_R8_UNORM, 65, false);
     std::printf("GUI_RECEIVE_CASE unsupported R8 %s\n", unsupported ? "PASS" : "FAIL");
     if(!unsupported) ++failed;
-    std::printf("GUI_RECEIVE_PEER failed=%d total=17\n", failed);
+    for(uint32_t width : {65u, 641u}) {
+        for(auto format : {NOZZLE_FORMAT_RGBA8_UNORM, NOZZLE_FORMAT_BGRA8_UNORM,
+                           NOZZLE_FORMAT_RGBA16_FLOAT, NOZZLE_FORMAT_RGBA32_FLOAT}) {
+            if(!run_verdict_case(format, width)) ++failed;
+        }
+    }
+    std::printf("GUI_RECEIVE_PEER failed=%d total=25\n", failed);
     return failed == 0 ? 0 : 1;
 }
