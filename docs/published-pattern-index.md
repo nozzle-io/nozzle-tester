@@ -7,7 +7,7 @@ and increments before publishing; its first successful frame is1.
 
 ## Failing-first coverage
 
-The initial regression commit leaves the producer's zero-based generation intact.
+Negative baseline `9c1215b` leaves the producer's zero-based generation intact.
 The GUI's non-UI generation/acquire/map/copy/unlock/commit path is extracted into
 `publish_gui_pattern` without changing that index. Tests use this same helper,
 then the real native receive/copy/verifier. They require content index to equal
@@ -27,6 +27,14 @@ index, verdict and failure reasons. The current pinned receiver acquires the lat
 committed frame when connecting, so a receiver started after ready observes N.
 
 ## Failure and scope boundary
+
+The fix generates payload index `successful_publications + 1` in the GUI and
+`uint64_t(frame) + 1` in the CLI. Receivers still use transport metadata unchanged.
+The sender's observed-index record and ready log report the generated index.
+Wrong-index native controls must retain the structured `stale_frame` reason.
+The CLI's JUCE quadrant mode retains its fixed corner colors; only its dynamic
+interior phase advances with the corrected index. No color/precision conversion
+or oracle tolerance change is introduced. Preview-only generation is unchanged.
 
 Acquire and discard do not advance the core counter. The tested active-mapping
 commit rejection is before the counter increment. A later backend signal failure

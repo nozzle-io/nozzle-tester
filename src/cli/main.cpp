@@ -624,7 +624,7 @@ int run_sender(const cli_options &options) {
             break;
         }
 
-        const uint64_t payload_index = frame;
+        const uint64_t payload_index = static_cast<uint64_t>(frame) + 1u;
         const nozzle_tester::image_buffer image = generate_sender_image(options, payload_index);
         if(!write_image_to_mapping(image, pixels)) {
             std::fprintf(stderr, "write_image_to_mapping_failed: storage format %s for requested %s\n", texture_format_name(pixels.format), nozzle_tester::format_to_string(options.format));

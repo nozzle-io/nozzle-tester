@@ -93,8 +93,12 @@ bool run_session(const std::string &name, nozzle_tester::tester_format format, u
         const auto result = nozzle_tester::verify_pattern(image, expected);
         expected.frame_index += 1;
         const auto wrong_index = nozzle_tester::verify_pattern(image, expected);
+        bool stale_reason = false;
+        for(const auto &reason : wrong_index.failure_reasons) {
+            if(reason == "stale_frame") stale_reason = true;
+        }
         const bool frame_pass = published.test.frame_index == info.frame_index && info.frame_index == count + 1 &&
-            result.result == nozzle_tester::verdict::pass && wrong_index.result == nozzle_tester::verdict::fail;
+            result.result == nozzle_tester::verdict::pass && wrong_index.result == nozzle_tester::verdict::fail && stale_reason;
         std::printf("PUBLISHED_PATTERN format=%s width=%u restart=%d payload=%llu metadata=%llu verdict=%s wrong_index=%s reasons=",
             nozzle_tester::format_to_string(format), width, restart, (unsigned long long)published.test.frame_index,
             (unsigned long long)info.frame_index, nozzle_tester::verdict_to_string(result.result),

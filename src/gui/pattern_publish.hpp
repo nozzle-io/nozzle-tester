@@ -12,9 +12,11 @@ struct gui_publication {
 };
 
 // Non-UI portion of publish_one_frame, also exercised by the native peer.
+// A fresh sender starts at frame 1. Callers must abandon the session on failure:
+// a late backend commit failure can advance core's counter without publication.
 inline gui_publication publish_gui_pattern(NozzleSender *sender, test_case test, uint64_t published_count) {
     gui_publication result{};
-    test.frame_index = published_count;
+    test.frame_index = published_count + 1u;
     result.test = test;
     result.image = generate_pattern(test);
     NozzleFrame *writable = nullptr;
