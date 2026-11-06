@@ -48,7 +48,8 @@ is rejected by the receive helper. The native producer remains alive while a rea
 CLI child receives its committed frame; matching expectations must exit 0 and
 wrong semantic precision must exit 1. CLI JSON is printed in the CI log, including
 its format check. These child processes exercise the actual CLI receive path,
-not tester's normal sender (whose payload/index alignment is deferred to #231).
+not tester's normal sender (whose payload/index alignment is the next separate
+repair, nozzle-dev#233, before the GUI evidence work).
 
 No all-backend invariant follows: external/native texture publication, sRGB,
 other formats, Windows/Linux GPU runtime and GUI window interaction remain
