@@ -72,7 +72,30 @@ def main():
         # Validate the actual file, not only the in-memory string.
         disk = json.loads(Path(directory, "frozen-evidence.json").read_text())
         check("gui_schema", disk["schema_version"] == "0.2.0")
-    print(f"GUI_EVIDENCE failed={failures} total=12")
+        bad = cases["bad_sequence"]
+        check("bad_failure_teardown", bad["capture_success"] and bad["raw_matches"]
+              and bad["record"]["verdict"] == "FAIL" and "rb_swap" in bad["record"]["failure_reasons"]
+              and any(a["role"] == "received_raw" for a in bad["record"]["artifacts"]))
+        failed_publish = cases["publish_sequence"]
+        pub = failed_publish["record"].get("publication") or {}
+        check("publish_failure_teardown", failed_publish["capture_success"] and failed_publish["raw_matches"]
+              and pub.get("succeeded") is False and pub.get("error") == "commit_failed"
+              and failed_publish["record"]["sender_name"] == "failed-sender")
+        mixed = cases["mixed_publication"]["record"]
+        pub = mixed.get("publication") or {}
+        check("old_receive_latest_publication", mixed["verdict"] == "PASS"
+              and mixed["frame"]["observed_index"] == 7
+              and pub.get("succeeded") is False and pub.get("error") == "commit_failed"
+              and any(a["role"] == "received_raw" for a in mixed["artifacts"]))
+        for name, reason in (("dimension_early_return", "dimension_mismatch"),
+                             ("format_early_return", "format_mismatch"),
+                             ("bytes_early_return", "byte_size_mismatch")):
+            record = cases[name]["record"]
+            check(name, record["verdict"] == "FAIL" and reason in record["failure_reasons"]
+                  and all(record["checks"][k] == "INCONCLUSIVE" for k in
+                          ("orientation", "channel_order", "alpha", "stale_frame", "stride_or_stretch"))
+                  and record["mismatch_count"] is None)
+    print(f"GUI_EVIDENCE failed={failures} total=18")
     return 1 if failures else 0
 
 

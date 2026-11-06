@@ -1,4 +1,5 @@
 #include "gui/evidence.hpp"
+#include "gui/runtime_tick.hpp"
 #include <cstdio>
 #include <filesystem>
 
@@ -50,7 +51,8 @@ int main() {
         && read_binary_file("frozen-preview.rgba", preview) && preview == image_to_rgba8_preview(image);
     emit("frozen_capture", state, capture.success, raw_matches);
 
-    clear_gui_observation(state);
+    bool stopped_running = true;
+    stop_gui_runtime(state, stopped_running, [] {});
     capture = capture_gui_evidence(state, "stopped");
     emit("stopped_capture", state, capture.success);
 
@@ -75,5 +77,50 @@ int main() {
     emit("bad_received", state);
     capture = capture_gui_evidence(state, "bad");
     emit("bad_capture", state, capture.success);
+
+    gui_evidence_state sequence;
+    bool running = true;
+    int released = 0;
+    const auto bad = make_rb_swap_fixture(image);
+    tick_gui_runtime(sequence, 3, running, [&] {
+        record_gui_generated(sequence, image, test, "original-channel", "loopback-sender", 1);
+        return true;
+    }, [&] {
+        receive(sequence, bad, test);
+        return false;
+    }, [&] { ++released; });
+    capture = capture_gui_evidence(sequence, "bad-sequence");
+    raw.clear();
+    emit("bad_sequence", sequence, capture.success,
+        !running && released == 1 && read_binary_file("bad-sequence-capture.raw", raw) && raw == bad.bytes);
+
+    clear_gui_observation(sequence);
+    running = true;
+    released = 0;
+    tick_gui_runtime(sequence, 1, running, [&] {
+        record_gui_publication_failure(sequence, test, "failed-sender", "sender", 2, "commit_failed");
+        return false;
+    }, [] { return true; }, [&] { ++released; });
+    capture = capture_gui_evidence(sequence, "publish-sequence");
+    emit("publish_sequence", sequence, capture.success, !running && released == 1);
+
+    clear_gui_observation(sequence);
+    receive(sequence, image, test);
+    record_gui_publication_failure(sequence, test, "original-channel", "loopback-sender", 2, "commit_failed");
+    capture = capture_gui_evidence(sequence, "mixed");
+    emit("mixed_publication", sequence, capture.success);
+
+    auto mismatch = test;
+    mismatch.width += 1;
+    receive(sequence, image, mismatch);
+    emit("dimension_early_return", sequence);
+    mismatch = test;
+    mismatch.format = tester_format::rgba16_float;
+    receive(sequence, image, mismatch);
+    emit("format_early_return", sequence);
+    auto short_image = image;
+    short_image.bytes.pop_back();
+    receive(sequence, short_image, test);
+    emit("bytes_early_return", sequence);
     return 0;
 }

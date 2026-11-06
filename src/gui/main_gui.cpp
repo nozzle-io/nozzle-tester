@@ -1,5 +1,6 @@
 #include "core/evidence.hpp"
 #include "gui/evidence.hpp"
+#include "gui/runtime_tick.hpp"
 #include "core/pattern.hpp"
 #include "gui/pattern_publish.hpp"
 #include "core/received_image.hpp"
@@ -138,8 +139,7 @@ void update_pattern_preview(gui_state &state) {
     nozzle_tester::record_gui_generated(state.evidence, image, test, state.channel_name, "gui-preview", 0);
 }
 
-void destroy_runtime(gui_state &state) {
-    nozzle_tester::clear_gui_observation(state.evidence);
+void release_runtime_handles(gui_state &state) {
     if(state.receiver != nullptr) {
         nozzle_receiver_destroy(state.receiver);
         state.receiver = nullptr;
@@ -148,11 +148,18 @@ void destroy_runtime(gui_state &state) {
         nozzle_sender_destroy(state.sender);
         state.sender = nullptr;
     }
-    state.running = false;
+}
+
+void destroy_runtime(gui_state &state) {
+    nozzle_tester::destroy_gui_runtime(state.evidence, state.running, [&] { release_runtime_handles(state); });
+}
+
+void stop_runtime(gui_state &state) {
+    nozzle_tester::stop_gui_runtime(state.evidence, state.running, [&] { release_runtime_handles(state); });
 }
 
 bool start_runtime(gui_state &state) {
-    destroy_runtime(state);
+    stop_runtime(state);
     state.last_error.clear();
     state.published_count = 0;
     state.observed_count = 0;
@@ -283,20 +290,9 @@ bool receive_one_frame(gui_state &state) {
 
 void tick_runtime(gui_state &state) {
     if(!state.running) return;
-    bool ok = true;
-    if(state.mode_index == 1) {
-        ok = publish_one_frame(state);
-    } else if(state.mode_index == 2) {
-        ok = receive_one_frame(state);
-    } else if(state.mode_index == 3) {
-        ok = publish_one_frame(state);
-        if(ok) {
-            ok = receive_one_frame(state);
-        }
-    }
-    if(!ok && state.mode_index != 2) {
-        destroy_runtime(state);
-    }
+    nozzle_tester::tick_gui_runtime(state.evidence, state.mode_index, state.running,
+        [&] { return publish_one_frame(state); }, [&] { return receive_one_frame(state); },
+        [&] { release_runtime_handles(state); });
     const auto now = std::chrono::steady_clock::now();
     const double elapsed = std::chrono::duration<double>(now - state.start_time).count();
     if(0.0 < elapsed) {
@@ -382,7 +378,7 @@ int main() {
                 }
             }
         } else if(ImGui::Button("Stop runtime")) {
-            destroy_runtime(state);
+            stop_runtime(state);
             state.status_text = "runtime stopped";
         }
         ImGui::SameLine();
