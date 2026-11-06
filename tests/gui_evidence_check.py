@@ -36,11 +36,17 @@ def main():
               and sender.get("publication", {}).get("succeeded") is True)
         generated = cases["generated_capture"]["record"]
         check("generated_not_received", generated["verdict"] == "INCONCLUSIVE"
+              and generated["publication"]["succeeded"] is True
+              and generated["publication"]["published_count"] == 1
+              and generated["publication"]["sender_name"] == "source"
+              and generated["publication"]["role"] == "sender"
               and not any(a["role"] in ("raw_capture", "received_raw") for a in generated["artifacts"])
               and not Path(directory, "source-capture.raw").exists())
         frozen = cases["frozen_capture"]["record"]
         check("frozen_metadata", frozen["role"] == "loopback-receiver"
               and frozen["sender_name"] == "original-channel"
+              and frozen["publication"]["sender_name"] == "source"
+              and frozen["publication"]["role"] == "sender"
               and frozen["frame"]["observed_index"] == 7
               and frozen["dimensions"]["expected_width"] == 65)
         check("float_capture_exact", cases["frozen_capture"]["raw_matches"]

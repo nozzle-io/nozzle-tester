@@ -115,8 +115,7 @@ void record_gui_received(gui_evidence_state &state, const image_buffer &image,
 void record_gui_publication_failure(gui_evidence_state &state, const test_case &test,
     const std::string &channel, const std::string &role, uint64_t published_count, const std::string &error) {
     record_gui_generated(state, test, channel, role, published_count);
-    state.latest_publication->succeeded = false;
-    state.latest_publication->error = error;
+    state.latest_publication = gui_publication_record{false, published_count, role, channel, error};
     state.current.publication = state.latest_publication;
     display(state, state.current);
 }
