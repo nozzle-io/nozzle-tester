@@ -53,6 +53,7 @@ add_subdirectory(deps/nozzle)
 add_library(nozzle_tester_core STATIC
     src/core/evidence.cpp
     src/core/pattern.cpp
+    src/gui/evidence.cpp
 )
 target_include_directories(nozzle_tester_core PUBLIC src)
 target_compile_definitions(nozzle_tester_core PRIVATE
@@ -127,6 +128,12 @@ if(NOZZLE_TESTER_BUILD_TESTS)
     add_executable(nozzle_tester_tests tests/test_main.cpp)
     target_link_libraries(nozzle_tester_tests PRIVATE nozzle_tester_core)
     add_test(NAME nozzle_tester_unit COMMAND nozzle_tester_tests)
+    add_executable(nozzle_tester_gui_evidence_cases tests/gui_evidence_cases.cpp)
+    target_link_libraries(nozzle_tester_gui_evidence_cases PRIVATE nozzle_tester_core)
+    add_test(NAME nozzle_tester_gui_evidence
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_evidence_check.py
+            --cases $<TARGET_FILE:nozzle_tester_gui_evidence_cases>)
+    set_tests_properties(nozzle_tester_gui_evidence PROPERTIES TIMEOUT 30)
     if(APPLE)
         add_executable(nozzle_tester_gui_pixel_peer tests/gui_pixel_peer.cpp)
         target_link_libraries(nozzle_tester_gui_pixel_peer PRIVATE nozzle_tester_core nozzle)
