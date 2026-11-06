@@ -1,4 +1,6 @@
 #include "core/evidence.hpp"
+#include "gui/evidence.hpp"
+#include "gui/runtime_tick.hpp"
 #include "core/pattern.hpp"
 #include "gui/pattern_publish.hpp"
 #include "core/received_image.hpp"
@@ -32,6 +34,8 @@ struct gui_state {
     int format_index{0};
     int timeout_ms{1};
     bool running{false};
+    std::string runtime_channel;
+    bool runtime_loopback{false};
     NozzleSender *sender{nullptr};
     NozzleReceiver *receiver{nullptr};
     uint64_t published_count{0};
@@ -43,12 +47,7 @@ struct gui_state {
     int texture_width{0};
     int texture_height{0};
     std::vector<uint8_t> preview_bytes;
-    nozzle_tester::image_buffer last_observed_image;
-    nozzle_tester::test_case last_expected_test;
-    uint64_t last_observed_frame_count{0};
-    bool has_last_observed_image{false};
-    std::string evidence_json;
-    std::string verdict{"INCONCLUSIVE"};
+    nozzle_tester::gui_evidence_state evidence;
     std::string status_text{"idle"};
     std::string last_error;
 };
@@ -132,41 +131,15 @@ void upload_preview_texture(gui_state &state, uint32_t width, uint32_t height, c
     state.texture_height = (int)height;
 }
 
-void set_record(gui_state &state, nozzle_tester::evidence_record &record) {
-    record.sender_name = state.channel_name;
-    record.receiver_name = "nozzle-tester-gui";
-    state.verdict = nozzle_tester::verdict_to_string(record.verification.result);
-    state.evidence_json = nozzle_tester::make_evidence_json(record);
-}
-
-void store_observed_image(gui_state &state, const nozzle_tester::image_buffer &image, const nozzle_tester::test_case &expected, uint64_t observed_frame_count) {
-    state.last_observed_image = image;
-    state.last_expected_test = expected;
-    state.last_observed_frame_count = observed_frame_count;
-    state.has_last_observed_image = true;
-}
-
 void update_pattern_preview(gui_state &state) {
     const nozzle_tester::test_case test = make_test_case(state);
     const nozzle_tester::image_buffer image = nozzle_tester::generate_pattern(test);
     const std::vector<uint8_t> preview = nozzle_tester::image_to_rgba8_preview(image);
     upload_preview_texture(state, image.width, image.height, preview);
-    store_observed_image(state, image, test, 1);
-
-    nozzle_tester::evidence_record record{};
-    record.role = "gui-preview";
-    record.backend = "cpu-preview";
-    record.test = test;
-    record.observed_width = test.width;
-    record.observed_height = test.height;
-    record.observed_frame_index = test.frame_index;
-    record.observed_frame_count = 1;
-    record.changed_across_observations = true;
-    record.verification = nozzle_tester::verify_pattern(image, test);
-    set_record(state, record);
+    nozzle_tester::record_gui_generated(state.evidence, test, state.channel_name, "gui-preview", 0);
 }
 
-void destroy_runtime(gui_state &state) {
+void release_runtime_handles(gui_state &state) {
     if(state.receiver != nullptr) {
         nozzle_receiver_destroy(state.receiver);
         state.receiver = nullptr;
@@ -175,17 +148,26 @@ void destroy_runtime(gui_state &state) {
         nozzle_sender_destroy(state.sender);
         state.sender = nullptr;
     }
-    state.running = false;
+}
+
+void destroy_runtime(gui_state &state) {
+    nozzle_tester::destroy_gui_runtime(state.running, [&] { release_runtime_handles(state); });
+}
+
+void stop_runtime(gui_state &state) {
+    nozzle_tester::stop_gui_runtime(state.evidence, state.running, [&] { release_runtime_handles(state); });
 }
 
 bool start_runtime(gui_state &state) {
-    destroy_runtime(state);
+    stop_runtime(state);
     state.last_error.clear();
     state.published_count = 0;
     state.observed_count = 0;
     state.dropped_count = 0;
     state.fps = 0.0;
     state.start_time = std::chrono::steady_clock::now();
+    state.runtime_channel = state.channel_name;
+    state.runtime_loopback = state.mode_index == 3;
 
     if(state.mode_index == 1 || state.mode_index == 3) {
         NozzleSenderDesc sender_desc{};
@@ -224,6 +206,9 @@ bool publish_one_frame(gui_state &state) {
         state.last_error = publication.error == NOZZLE_OK && std::strcmp(publication.failed_stage, "writable_mapping_failed") == 0
             ? "writable_mapping_failed: invalid mapped pixels"
             : error_text(publication.failed_stage, publication.error);
+        nozzle_tester::record_gui_publication_failure(state.evidence, publication.test,
+            state.runtime_channel, state.runtime_loopback ? "loopback-sender" : "sender",
+            state.published_count, state.last_error);
         return false;
     }
     const auto &test = publication.test;
@@ -234,24 +219,8 @@ bool publish_one_frame(gui_state &state) {
     upload_preview_texture(state, image.width, image.height, preview);
     state.published_count += 1;
     state.frame_index = (int)test.frame_index;
-    store_observed_image(state, image, test, state.published_count);
-
-    nozzle_tester::evidence_record record{};
-    record.role = state.mode_index == 3 ? "loopback-sender" : "sender";
-    record.backend = "auto";
-    record.test = test;
-    record.observed_width = test.width;
-    record.observed_height = test.height;
-    record.observed_frame_index = test.frame_index;
-    record.observed_frame_count = state.published_count;
-    record.changed_across_observations = 1 < state.published_count;
-    record.verification.result = nozzle_tester::verdict::pass;
-    record.verification.dimensions_ok = true;
-    record.verification.orientation_ok = true;
-    record.verification.channel_order_ok = true;
-    record.verification.alpha_ok = true;
-    record.verification.stale_frame_ok = 1 < state.published_count;
-    set_record(state, record);
+    nozzle_tester::record_gui_generated(state.evidence, test, state.runtime_channel,
+        state.runtime_loopback ? "loopback-sender" : "sender", state.published_count);
     return true;
 }
 
@@ -301,43 +270,29 @@ bool receive_one_frame(gui_state &state) {
     const nozzle_tester::verify_result verify = nozzle_tester::verify_pattern(image, expected);
 
     state.observed_count += 1;
-    store_observed_image(state, image, expected, state.observed_count);
     state.dropped_count = info.dropped_frame_count;
     state.frame_index = (int)info.frame_index;
     nozzle_tester::evidence_record record{};
-    record.role = state.mode_index == 3 ? "loopback-receiver" : "receiver";
+    record.role = state.runtime_loopback ? "loopback-receiver" : "receiver";
     record.backend = "auto";
     record.test = expected;
     record.observed_width = info.width;
     record.observed_height = info.height;
     record.observed_frame_index = info.frame_index;
     record.observed_frame_count = state.observed_count;
-    record.changed_across_observations = 1 < state.observed_count;
     record.verification = verify;
     if(record.verification.result == nozzle_tester::verdict::pass) {
-        record.verification.stale_frame_ok = 1 < state.observed_count;
         state.last_error.clear();
     }
-    set_record(state, record);
+    nozzle_tester::record_gui_received(state.evidence, image, record, state.runtime_channel);
     return verify.result == nozzle_tester::verdict::pass;
 }
 
 void tick_runtime(gui_state &state) {
     if(!state.running) return;
-    bool ok = true;
-    if(state.mode_index == 1) {
-        ok = publish_one_frame(state);
-    } else if(state.mode_index == 2) {
-        ok = receive_one_frame(state);
-    } else if(state.mode_index == 3) {
-        ok = publish_one_frame(state);
-        if(ok) {
-            ok = receive_one_frame(state);
-        }
-    }
-    if(!ok && state.mode_index != 2) {
-        destroy_runtime(state);
-    }
+    nozzle_tester::tick_gui_runtime(state.mode_index, state.running,
+        [&] { return publish_one_frame(state); }, [&] { return receive_one_frame(state); },
+        [&] { release_runtime_handles(state); });
     const auto now = std::chrono::steady_clock::now();
     const double elapsed = std::chrono::duration<double>(now - state.start_time).count();
     if(0.0 < elapsed) {
@@ -347,46 +302,8 @@ void tick_runtime(gui_state &state) {
 }
 
 void capture_evidence(gui_state &state) {
-    const std::string raw_capture_path = "nozzle-tester-gui-capture.raw";
-    const std::string preview_capture_path = "nozzle-tester-gui-preview.rgba";
-    const std::string evidence_path = "nozzle-tester-gui-evidence.json";
-    nozzle_tester::evidence_record record{};
-    record.role = mode_role_names[state.mode_index < 0 ? 0 : state.mode_index % 4];
-    record.backend = state.running ? "auto" : "cpu-preview";
-    record.sender_name = state.channel_name;
-    record.receiver_name = "nozzle-tester-gui";
-    if(state.has_last_observed_image) {
-        nozzle_tester::write_binary_file(raw_capture_path, state.last_observed_image.bytes);
-        record.test = state.last_expected_test;
-        record.observed_width = state.last_observed_image.width;
-        record.observed_height = state.last_observed_image.height;
-        record.observed_frame_index = state.last_expected_test.frame_index;
-        record.observed_frame_count = state.last_observed_frame_count;
-        record.changed_across_observations = 1 < state.last_observed_frame_count;
-        record.native_texture_format = nozzle_tester::format_to_string(state.last_observed_image.format);
-        record.cpu_evidence_format = nozzle_tester::format_to_string(state.last_observed_image.format);
-        record.verification = nozzle_tester::verify_pattern(state.last_observed_image, state.last_expected_test);
-        record.artifact_paths.push_back(raw_capture_path);
-        record.artifacts.push_back({"raw_capture", raw_capture_path});
-    } else {
-        record.test = make_test_case(state);
-        record.verification.result = nozzle_tester::verdict::fail;
-        record.verification.failure_reasons.push_back("missing_capture");
-    }
-    if(!state.preview_bytes.empty()) {
-        nozzle_tester::write_binary_file(preview_capture_path, state.preview_bytes);
-        record.artifact_paths.push_back(preview_capture_path);
-        record.artifacts.push_back({"preview_capture", preview_capture_path});
-    }
-    if(!state.last_error.empty() && record.verification.result == nozzle_tester::verdict::pass) {
-        record.verification.result = nozzle_tester::verdict::fail;
-        record.verification.failure_reasons.push_back(state.last_error);
-    }
-    const std::string json = nozzle_tester::make_evidence_json(record);
-    nozzle_tester::write_text_file(evidence_path, json);
-    state.evidence_json = json;
-    state.verdict = nozzle_tester::verdict_to_string(record.verification.result);
-    state.status_text = "wrote " + evidence_path + ", " + raw_capture_path + ", and " + preview_capture_path;
+    const auto result = nozzle_tester::capture_gui_evidence(state.evidence);
+    state.status_text = result.status;
 }
 
 } // namespace
@@ -461,7 +378,7 @@ int main() {
                 }
             }
         } else if(ImGui::Button("Stop runtime")) {
-            destroy_runtime(state);
+            stop_runtime(state);
             state.status_text = "runtime stopped";
         }
         ImGui::SameLine();
@@ -478,18 +395,17 @@ int main() {
             capture_evidence(state);
         }
 
-        ImGui::Text("verdict: %s", state.verdict.c_str());
+        ImGui::Text("verdict: %s", state.evidence.verdict_text.c_str());
         ImGui::Text("published: %llu observed: %llu dropped: %llu fps: %.2f", (unsigned long long)state.published_count, (unsigned long long)state.observed_count, (unsigned long long)state.dropped_count, state.fps);
         ImGui::Text("status: %s", state.status_text.c_str());
         if(!state.last_error.empty()) {
             ImGui::Text("last error: %s", state.last_error.c_str());
         }
-        ImGui::TextWrapped("The GUI uses the same pattern/oracle as nozzle-tester-cli. Capture evidence writes JSON plus raw and RGBA-preview artifacts; a screenshot alone is not the oracle.");
         const float max_width = 760.0f;
         const float scale = state.texture_width > 0 ? std::min(max_width / (float)state.texture_width, 1.0f) : 1.0f;
         ImGui::Image((ImTextureID)(intptr_t)state.texture, ImVec2((float)state.texture_width * scale, (float)state.texture_height * scale));
         ImGui::BeginChild("evidence json", ImVec2(-1.0f, 260.0f), true, ImGuiWindowFlags_HorizontalScrollbar);
-        ImGui::TextUnformatted(state.evidence_json.c_str());
+        ImGui::TextUnformatted(state.evidence.json.c_str());
         ImGui::EndChild();
         ImGui::End();
 
