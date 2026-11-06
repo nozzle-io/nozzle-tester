@@ -1,5 +1,6 @@
 #include "core/evidence.hpp"
 #include "core/pattern.hpp"
+#include "gui/pixel_copy.hpp"
 
 #include <nozzle/nozzle_c.h>
 
@@ -102,16 +103,6 @@ void glfw_error_callback(int error, const char *description) {
 nozzle_tester::tester_format current_format(const gui_state &state) {
     const int format_index = state.format_index < 0 ? 0 : state.format_index % 4;
     return formats[format_index];
-}
-
-NozzleTextureFormat to_nozzle_format(nozzle_tester::tester_format format) {
-    switch(format) {
-        case nozzle_tester::tester_format::rgba8_unorm: return NOZZLE_FORMAT_RGBA8_UNORM;
-        case nozzle_tester::tester_format::bgra8_unorm: return NOZZLE_FORMAT_BGRA8_UNORM;
-        case nozzle_tester::tester_format::rgba16_float: return NOZZLE_FORMAT_RGBA16_FLOAT;
-        case nozzle_tester::tester_format::rgba32_float: return NOZZLE_FORMAT_RGBA32_FLOAT;
-        default: return NOZZLE_FORMAT_UNKNOWN;
-    }
 }
 
 bool from_nozzle_format(NozzleTextureFormat format, nozzle_tester::tester_format &out_format) {
@@ -240,10 +231,9 @@ bool publish_one_frame(gui_state &state) {
     nozzle_tester::test_case test = make_test_case(state);
     test.frame_index = state.published_count;
     const nozzle_tester::image_buffer image = nozzle_tester::generate_pattern(test);
-    const uint32_t row_bytes = test.width * nozzle_tester::bytes_per_pixel(test.format);
 
     NozzleFrame *writable = nullptr;
-    NozzleErrorCode error = nozzle_sender_acquire_writable_frame(state.sender, test.width, test.height, to_nozzle_format(test.format), &writable);
+    NozzleErrorCode error = nozzle_sender_acquire_writable_frame(state.sender, test.width, test.height, nozzle_tester::gui_image_format(test.format), &writable);
     if(error != NOZZLE_OK || writable == nullptr) {
         state.last_error = error_text("acquire_writable_frame_failed", error);
         return false;
@@ -252,7 +242,7 @@ bool publish_one_frame(gui_state &state) {
     NozzlePixelMapping *mapping = nullptr;
     NozzleMappedPixels pixels{};
     error = nozzle_frame_lock_writable_pixels_mapping_with_origin(writable, NOZZLE_ORIGIN_TOP_LEFT, &mapping, &pixels);
-    if(error != NOZZLE_OK || mapping == nullptr || pixels.data == nullptr || pixels.row_stride_bytes < (int64_t)row_bytes) {
+    if(error != NOZZLE_OK || mapping == nullptr) {
         if(mapping != nullptr) nozzle_pixel_mapping_unlock(&mapping);
         nozzle_sender_discard_frame(state.sender, writable);
         nozzle_frame_release(writable);
@@ -262,12 +252,17 @@ bool publish_one_frame(gui_state &state) {
         return false;
     }
 
-    uint8_t *target = (uint8_t*)pixels.data;
-    for(uint32_t y = 0; y < test.height; y++) {
-        std::memcpy(target + (int64_t)y * pixels.row_stride_bytes, image.bytes.data() + (size_t)y * row_bytes, row_bytes);
+    error = nozzle_tester::copy_gui_image_to_mapping(image, pixels);
+    const NozzleErrorCode unlock_error = nozzle_pixel_mapping_unlock_checked(&mapping);
+    if(error != NOZZLE_OK || unlock_error != NOZZLE_OK) {
+        nozzle_sender_discard_frame(state.sender, writable);
+        nozzle_frame_release(writable);
+        state.last_error = error != NOZZLE_OK ? error_text("copy_pixels_failed", error)
+                                            : error_text("unlock_pixels_failed", unlock_error);
+        return false;
     }
-    nozzle_pixel_mapping_unlock(&mapping);
     error = nozzle_sender_commit_frame(state.sender, writable);
+    if(error != NOZZLE_OK) nozzle_sender_discard_frame(state.sender, writable);
     nozzle_frame_release(writable);
     if(error != NOZZLE_OK) {
         state.last_error = error_text("commit_frame_failed", error);

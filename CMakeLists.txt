@@ -127,6 +127,12 @@ if(NOZZLE_TESTER_BUILD_TESTS)
     add_executable(nozzle_tester_tests tests/test_main.cpp)
     target_link_libraries(nozzle_tester_tests PRIVATE nozzle_tester_core)
     add_test(NAME nozzle_tester_unit COMMAND nozzle_tester_tests)
+    if(APPLE)
+        add_executable(nozzle_tester_gui_pixel_peer tests/gui_pixel_peer.cpp)
+        target_link_libraries(nozzle_tester_gui_pixel_peer PRIVATE nozzle_tester_core nozzle)
+        add_test(NAME nozzle_tester_gui_pixel_peer COMMAND nozzle_tester_gui_pixel_peer)
+        set_tests_properties(nozzle_tester_gui_pixel_peer PROPERTIES TIMEOUT 60)
+    endif()
     add_test(NAME nozzle_tester_cli_self_test COMMAND nozzle-tester-cli self-test --evidence nozzle-tester-self-test.json)
     add_test(
         NAME nozzle_tester_cli_discovery_smoke
