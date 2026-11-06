@@ -33,6 +33,8 @@ struct gui_state {
     int format_index{0};
     int timeout_ms{1};
     bool running{false};
+    std::string runtime_channel;
+    bool runtime_loopback{false};
     NozzleSender *sender{nullptr};
     NozzleReceiver *receiver{nullptr};
     uint64_t published_count{0};
@@ -157,6 +159,8 @@ bool start_runtime(gui_state &state) {
     state.dropped_count = 0;
     state.fps = 0.0;
     state.start_time = std::chrono::steady_clock::now();
+    state.runtime_channel = state.channel_name;
+    state.runtime_loopback = state.mode_index == 3;
 
     if(state.mode_index == 1 || state.mode_index == 3) {
         NozzleSenderDesc sender_desc{};
@@ -195,6 +199,8 @@ bool publish_one_frame(gui_state &state) {
         state.last_error = publication.error == NOZZLE_OK && std::strcmp(publication.failed_stage, "writable_mapping_failed") == 0
             ? "writable_mapping_failed: invalid mapped pixels"
             : error_text(publication.failed_stage, publication.error);
+        nozzle_tester::record_gui_publication_failure(state.evidence, publication.test,
+            state.runtime_channel, state.published_count, state.last_error);
         return false;
     }
     const auto &test = publication.test;
@@ -205,8 +211,8 @@ bool publish_one_frame(gui_state &state) {
     upload_preview_texture(state, image.width, image.height, preview);
     state.published_count += 1;
     state.frame_index = (int)test.frame_index;
-    nozzle_tester::record_gui_generated(state.evidence, image, test, state.channel_name,
-        state.mode_index == 3 ? "loopback-sender" : "sender", state.published_count);
+    nozzle_tester::record_gui_generated(state.evidence, image, test, state.runtime_channel,
+        state.runtime_loopback ? "loopback-sender" : "sender", state.published_count);
     return true;
 }
 
@@ -259,20 +265,18 @@ bool receive_one_frame(gui_state &state) {
     state.dropped_count = info.dropped_frame_count;
     state.frame_index = (int)info.frame_index;
     nozzle_tester::evidence_record record{};
-    record.role = state.mode_index == 3 ? "loopback-receiver" : "receiver";
+    record.role = state.runtime_loopback ? "loopback-receiver" : "receiver";
     record.backend = "auto";
     record.test = expected;
     record.observed_width = info.width;
     record.observed_height = info.height;
     record.observed_frame_index = info.frame_index;
     record.observed_frame_count = state.observed_count;
-    record.changed_across_observations = 1 < state.observed_count;
     record.verification = verify;
     if(record.verification.result == nozzle_tester::verdict::pass) {
-        record.verification.stale_frame_ok = 1 < state.observed_count;
         state.last_error.clear();
     }
-    nozzle_tester::record_gui_received(state.evidence, image, record, state.channel_name);
+    nozzle_tester::record_gui_received(state.evidence, image, record, state.runtime_channel);
     return verify.result == nozzle_tester::verdict::pass;
 }
 
@@ -301,11 +305,8 @@ void tick_runtime(gui_state &state) {
 }
 
 void capture_evidence(gui_state &state) {
-    const auto result = nozzle_tester::capture_gui_evidence(state.evidence,
-        mode_role_names[state.mode_index < 0 ? 0 : state.mode_index % 4], state.channel_name,
-        state.running, make_test_case(state), state.preview_bytes, state.last_error);
+    const auto result = nozzle_tester::capture_gui_evidence(state.evidence);
     state.status_text = result.status;
-    if(!result.success) state.last_error = result.status;
 }
 
 } // namespace

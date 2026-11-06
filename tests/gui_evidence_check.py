@@ -52,13 +52,26 @@ def main():
         check("write_failure_visible", not failed["capture_success"]
               and failed["record"].get("capture_errors")
               and not failed["record"]["artifacts"])
+        partial = cases["raw_write_failure"]
+        partial_disk = json.loads(Path(directory, "rawfail-evidence.json").read_text())
+        check("partial_write", not partial["capture_success"]
+              and partial_disk["capture_errors"]
+              and [a["role"] for a in partial_disk["artifacts"]] == ["received_preview"])
+        json_failed = cases["json_write_failure"]
+        check("json_write", not json_failed["capture_success"]
+              and json_failed["record"]["capture_errors"] == ["write_failed: jsonfail-evidence.json"]
+              and len(json_failed["record"]["artifacts"]) == 2)
+        publication = cases["publication_failure"]["record"]
+        check("publication_failure", publication["publication"] == {"succeeded": False, "published_count": 2}
+              and publication["verdict"] == "INCONCLUSIVE"
+              and all(v == "INCONCLUSIVE" for v in publication["checks"].values()))
         for name in ("bad_received", "bad_capture"):
             record = cases[name]["record"]
             check(name, record["verdict"] == "FAIL" and "rb_swap" in record["failure_reasons"])
         # Validate the actual file, not only the in-memory string.
         disk = json.loads(Path(directory, "frozen-evidence.json").read_text())
         check("gui_schema", disk["schema_version"] == "0.2.0")
-    print(f"GUI_EVIDENCE failed={failures} total=9")
+    print(f"GUI_EVIDENCE failed={failures} total=12")
     return 1 if failures else 0
 
 

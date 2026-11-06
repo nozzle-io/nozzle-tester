@@ -1,5 +1,6 @@
 #include "gui/evidence.hpp"
 #include <cstdio>
+#include <filesystem>
 
 using namespace nozzle_tester;
 
@@ -30,35 +31,49 @@ int main() {
     test.frame_index = 7;
     test.format = tester_format::rgba32_float;
     const auto image = generate_pattern(test);
-    const auto preview = image_to_rgba8_preview(image);
     gui_evidence_state state;
     record_gui_generated(state, image, test, "source", "sender", 1);
     emit("sender", state);
     record_gui_generated(state, image, test, "source", "gui-preview", 0);
-    auto capture = capture_gui_evidence(state, "receiver", "changed-channel", true, test, preview, "", "source");
+    auto capture = capture_gui_evidence(state, "source");
     emit("generated_capture", state, capture.success);
 
     receive(state, image, test);
     auto changed = test;
     changed.width = 123;
     changed.frame_index = 90;
-    capture = capture_gui_evidence(state, "sender", "changed-channel", false, changed, {}, "", "frozen");
+    record_gui_generated(state, generate_pattern(changed), changed, "changed-channel", "gui-preview", 0);
+    capture = capture_gui_evidence(state, "frozen");
     std::vector<uint8_t> raw;
-    const bool raw_matches = read_binary_file("frozen-capture.raw", raw) && raw == image.bytes;
+    std::vector<uint8_t> preview;
+    const bool raw_matches = read_binary_file("frozen-capture.raw", raw) && raw == image.bytes
+        && read_binary_file("frozen-preview.rgba", preview) && preview == image_to_rgba8_preview(image);
     emit("frozen_capture", state, capture.success, raw_matches);
 
     clear_gui_observation(state);
-    capture = capture_gui_evidence(state, "receiver", "new-session", true, test, preview, "", "stopped");
+    capture = capture_gui_evidence(state, "stopped");
     emit("stopped_capture", state, capture.success);
 
     receive(state, image, test);
     if(!write_text_file("blocked", "not a directory")) return 2;
-    capture = capture_gui_evidence(state, "receiver", "original-channel", true, test, preview, "", "blocked/child");
+    capture = capture_gui_evidence(state, "blocked/child");
     emit("failed_write", state, capture.success);
+
+    std::error_code error;
+    if(!std::filesystem::create_directory("rawfail-capture.raw", error) || error) return 2;
+    capture = capture_gui_evidence(state, "rawfail");
+    emit("raw_write_failure", state, capture.success);
+    if(!std::filesystem::create_directory("jsonfail-evidence.json", error) || error) return 2;
+    capture = capture_gui_evidence(state, "jsonfail");
+    emit("json_write_failure", state, capture.success);
+
+    clear_gui_observation(state);
+    record_gui_publication_failure(state, test, "failed-sender", 2, "commit_failed");
+    emit("publication_failure", state);
 
     receive(state, make_rb_swap_fixture(image), test);
     emit("bad_received", state);
-    capture = capture_gui_evidence(state, "receiver", "original-channel", true, test, {}, "", "bad");
+    capture = capture_gui_evidence(state, "bad");
     emit("bad_capture", state, capture.success);
     return 0;
 }
