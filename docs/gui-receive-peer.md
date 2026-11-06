@@ -39,19 +39,27 @@ The repair retains storage in `image_buffer.format` and received semantics in
 `image_buffer.semantic_format`. `verify_pattern` compares expected format with
 semantics, while byte size and decoding still use storage. CPU fixtures/raw-file
 verification without transport metadata keep their original storage comparison.
-Live receive rejects unsupported/unknown semantic metadata instead of inventing
-semantics. Stored GUI image copies retain semantics for subsequent capture checks.
+Stored GUI image copies retain semantics for subsequent capture checks.
+
+The first repair's rejection of UNKNOWN raw semantics is a regression: nozzle-dev#226
+documents valid external publishers with raw UNKNOWN and resolved BGRA8 semantics.
+The next negative baseline replaces synthetic UNKNOWN rejection with real public
+`sender.publish_external_texture(frame.get_texture())` publishers. It asserts raw
+UNKNOWN and resolved BGRA8 for 65x33/641x33, then requires helper and CLI PASS for
+BGRA8 and format-mismatch rejection for RGBA16F. A real external R8 frame remains
+unsupported. Source ownership is retained until all receivers finish. The raw
+UNKNOWN assertion intentionally requires updating when the pinned core advances
+past #226; compatibility with current/older publishers must remain covered.
 
 Each generated native case also checks genuine format mismatch, channel swap,
-vertical flip and alpha corruption rejection. Synthetic missing semantic metadata
-is rejected by the receive helper. The native producer remains alive while a real
+vertical flip and alpha corruption rejection. The native producer remains alive while a real
 CLI child receives its committed frame; matching expectations must exit 0 and
 wrong semantic precision must exit 1. CLI JSON is printed in the CI log, including
 its format check. These child processes exercise the actual CLI receive path,
 not tester's normal sender (whose payload/index alignment is the next separate
 repair, nozzle-dev#233, before the GUI evidence work).
 
-No all-backend invariant follows: external/native texture publication, sRGB,
+No all-backend invariant follows: arbitrary external textures, GL publication, sRGB,
 other formats, Windows/Linux GPU runtime and GUI window interaction remain
 uncovered. Both producer origins use a top-left receiver copy. The original copy
 and GUI-helper verdict checks are same-process; only the CLI child checks are
