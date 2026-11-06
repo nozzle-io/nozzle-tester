@@ -1,6 +1,6 @@
 #include "core/evidence.hpp"
 #include "core/pattern.hpp"
-#include "gui/pixel_copy.hpp"
+#include "gui/pattern_publish.hpp"
 #include "core/received_image.hpp"
 
 #include <nozzle/nozzle_c.h>
@@ -219,46 +219,15 @@ bool start_runtime(gui_state &state) {
 
 bool publish_one_frame(gui_state &state) {
     if(state.sender == nullptr) return false;
-    nozzle_tester::test_case test = make_test_case(state);
-    test.frame_index = state.published_count;
-    const nozzle_tester::image_buffer image = nozzle_tester::generate_pattern(test);
-
-    NozzleFrame *writable = nullptr;
-    NozzleErrorCode error = nozzle_sender_acquire_writable_frame(state.sender, test.width, test.height, nozzle_tester::gui_image_format(test.format), &writable);
-    if(error != NOZZLE_OK || writable == nullptr) {
-        state.last_error = error_text("acquire_writable_frame_failed", error);
-        return false;
-    }
-
-    NozzlePixelMapping *mapping = nullptr;
-    NozzleMappedPixels pixels{};
-    error = nozzle_frame_lock_writable_pixels_mapping_with_origin(writable, NOZZLE_ORIGIN_TOP_LEFT, &mapping, &pixels);
-    if(error != NOZZLE_OK || mapping == nullptr) {
-        if(mapping != nullptr) nozzle_pixel_mapping_unlock(&mapping);
-        nozzle_sender_discard_frame(state.sender, writable);
-        nozzle_frame_release(writable);
-        state.last_error = error == NOZZLE_OK
+    const auto publication = nozzle_tester::publish_gui_pattern(state.sender, make_test_case(state), state.published_count);
+    if(publication.failed_stage != nullptr) {
+        state.last_error = publication.error == NOZZLE_OK && std::strcmp(publication.failed_stage, "writable_mapping_failed") == 0
             ? "writable_mapping_failed: invalid mapped pixels"
-            : error_text("writable_mapping_failed", error);
+            : error_text(publication.failed_stage, publication.error);
         return false;
     }
-
-    error = nozzle_tester::copy_gui_image_to_mapping(image, pixels);
-    const NozzleErrorCode unlock_error = nozzle_pixel_mapping_unlock_checked(&mapping);
-    if(error != NOZZLE_OK || unlock_error != NOZZLE_OK) {
-        nozzle_sender_discard_frame(state.sender, writable);
-        nozzle_frame_release(writable);
-        state.last_error = error != NOZZLE_OK ? error_text("copy_pixels_failed", error)
-                                            : error_text("unlock_pixels_failed", unlock_error);
-        return false;
-    }
-    error = nozzle_sender_commit_frame(state.sender, writable);
-    if(error != NOZZLE_OK) nozzle_sender_discard_frame(state.sender, writable);
-    nozzle_frame_release(writable);
-    if(error != NOZZLE_OK) {
-        state.last_error = error_text("commit_frame_failed", error);
-        return false;
-    }
+    const auto &test = publication.test;
+    const auto &image = publication.image;
     state.last_error.clear();
 
     const std::vector<uint8_t> preview = nozzle_tester::image_to_rgba8_preview(image);

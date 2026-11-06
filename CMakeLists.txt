@@ -136,6 +136,14 @@ if(NOZZLE_TESTER_BUILD_TESTS)
         target_link_libraries(nozzle_tester_gui_receive_peer PRIVATE nozzle_tester_core nozzle)
         add_test(NAME nozzle_tester_gui_receive_peer COMMAND nozzle_tester_gui_receive_peer $<TARGET_FILE:nozzle-tester-cli>)
         set_tests_properties(nozzle_tester_gui_receive_peer PROPERTIES TIMEOUT 60)
+        add_executable(nozzle_tester_published_pattern_peer tests/published_pattern_peer.cpp)
+        target_link_libraries(nozzle_tester_published_pattern_peer PRIVATE nozzle_tester_core nozzle)
+        add_test(NAME nozzle_tester_published_pattern_peer COMMAND nozzle_tester_published_pattern_peer)
+        set_tests_properties(nozzle_tester_published_pattern_peer PROPERTIES TIMEOUT 60)
+        add_test(NAME nozzle_tester_cli_receiver_pattern
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/receiver_pattern_smoke.py
+                --cli $<TARGET_FILE:nozzle-tester-cli>)
+        set_tests_properties(nozzle_tester_cli_receiver_pattern PROPERTIES TIMEOUT 90)
     endif()
     add_test(NAME nozzle_tester_cli_self_test COMMAND nozzle-tester-cli self-test --evidence nozzle-tester-self-test.json)
     add_test(
