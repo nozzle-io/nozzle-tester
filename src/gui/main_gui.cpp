@@ -1,5 +1,6 @@
 #include "core/evidence.hpp"
 #include "core/pattern.hpp"
+#include "gui/pixel_copy.hpp"
 
 #include <nozzle/nozzle_c.h>
 
@@ -262,10 +263,7 @@ bool publish_one_frame(gui_state &state) {
         return false;
     }
 
-    uint8_t *target = (uint8_t*)pixels.data;
-    for(uint32_t y = 0; y < test.height; y++) {
-        std::memcpy(target + (int64_t)y * pixels.row_stride_bytes, image.bytes.data() + (size_t)y * row_bytes, row_bytes);
-    }
+    nozzle_tester::copy_gui_image_to_mapping(image, pixels);
     nozzle_pixel_mapping_unlock(&mapping);
     error = nozzle_sender_commit_frame(state.sender, writable);
     nozzle_frame_release(writable);

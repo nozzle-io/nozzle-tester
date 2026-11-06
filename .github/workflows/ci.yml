@@ -75,7 +75,7 @@ jobs:
         run: bash deps/nozzle/scripts/check_x86_64_isa.sh build/nozzle-tester-cli build/nozzle-tester
 
       - name: Test
-        run: ctest --test-dir build --build-config Release --output-on-failure
+        run: ctest --test-dir build --build-config Release --verbose
 
       - name: Verify universal binaries
         if: runner.os == 'macOS'
