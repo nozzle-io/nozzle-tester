@@ -85,7 +85,7 @@ bool run_case(nozzle_tester::tester_format format, uint32_t width, uint32_t heig
     if(!mapped.data || mapped.width != width || mapped.height != height ||
        mapped.format != expected_storage || mapped.row_stride_bytes < static_cast<int64_t>(width) * bpp) return false;
     std::printf("%s native format=%d stride=%lld\n", label.c_str(), (int)mapped.format, (long long)mapped.row_stride_bytes);
-    nozzle_tester::copy_gui_image_to_mapping(image, mapped);
+    if(!ok(nozzle_tester::copy_gui_image_to_mapping(image, mapped), "GUI copy")) return false;
     if(!ok(nozzle_pixel_mapping_unlock_checked(&peer.write_map), "write unlock") ||
        !ok(nozzle_sender_commit_frame(peer.sender, peer.write), "commit")) return false;
     peer.committed = true;
@@ -121,6 +121,54 @@ bool run_case(nozzle_tester::tester_format format, uint32_t width, uint32_t heig
     }
     return ok(nozzle_pixel_mapping_unlock_checked(&peer.read_map), "native unlock");
 }
+
+// Synthetic mappings cover cases the native Metal lane does not usually expose.
+bool copy_contract() {
+    using nozzle_tester::tester_format;
+    for(bool reverse : {false, true}) {
+        nozzle_tester::image_buffer image{2, 2, reverse ? tester_format::bgra8_unorm : tester_format::rgba8_unorm,
+            {191,23,41,149, 192,24,42,150, 193,25,43,151, 194,26,44,152}};
+        if(reverse) {
+            for(size_t i = 0; i < image.bytes.size(); i += 4) std::swap(image.bytes[i], image.bytes[i+2]);
+        }
+        uint8_t storage[32];
+        std::memset(storage, 0xcd, sizeof(storage));
+        NozzleMappedPixels mapped{};
+        mapped.data = storage + 16;
+        mapped.width = 2;
+        mapped.height = 2;
+        mapped.row_stride_bytes = -16;
+        mapped.origin = NOZZLE_ORIGIN_BOTTOM_LEFT;
+        mapped.format = reverse ? NOZZLE_FORMAT_RGBA8_UNORM : NOZZLE_FORMAT_BGRA8_UNORM;
+        if(nozzle_tester::copy_gui_image_to_mapping(image, mapped) != NOZZLE_OK) return false;
+        for(int y = 0; y < 2; ++y) {
+            const uint8_t *row = storage + 16 - y*16;
+            for(int x = 0; x < 2; ++x) {
+                const int index = (1-y)*2+x;
+                const uint8_t expected[] = {static_cast<uint8_t>((reverse ? 191 : 41) + index),
+                    static_cast<uint8_t>(23 + index), static_cast<uint8_t>((reverse ? 41 : 191) + index),
+                    static_cast<uint8_t>(149 + index)};
+                if(std::memcmp(row + x*4, expected, 4) != 0) return false;
+            }
+            for(int i = 8; i < 16; ++i) if(row[i] != 0xcd) return false;
+        }
+        std::memset(storage, 0xcd, sizeof(storage));
+        image.bytes.pop_back();
+        if(nozzle_tester::copy_gui_image_to_mapping(image, mapped) != NOZZLE_ERROR_INVALID_ARGUMENT) return false;
+        image.bytes.push_back(152);
+        mapped.row_stride_bytes = std::numeric_limits<int64_t>::min();
+        if(nozzle_tester::copy_gui_image_to_mapping(image, mapped) != NOZZLE_ERROR_INVALID_ARGUMENT) return false;
+        mapped.row_stride_bytes = 7;
+        if(nozzle_tester::copy_gui_image_to_mapping(image, mapped) != NOZZLE_ERROR_INVALID_ARGUMENT) return false;
+        mapped.row_stride_bytes = -16;
+        image.format = tester_format::rgba32_float;
+        image.bytes.resize(64);
+        mapped.format = NOZZLE_FORMAT_RGBA16_FLOAT;
+        if(nozzle_tester::copy_gui_image_to_mapping(image, mapped) != NOZZLE_ERROR_UNSUPPORTED_FORMAT) return false;
+        for(uint8_t byte : storage) if(byte != 0xcd) return false;
+    }
+    return true;
+}
 } // namespace
 
 int main() {
@@ -133,6 +181,9 @@ int main() {
             if(!pass) ++failed;
         }
     }
-    std::printf("GUI_PIXEL_PEER failed=%d total=8\n", failed);
+    const bool contract_pass = copy_contract();
+    std::printf("GUI copy contract (CPU synthetic) %s\n", contract_pass ? "PASS" : "FAIL");
+    if(!contract_pass) ++failed;
+    std::printf("GUI_PIXEL_PEER failed=%d total=9\n", failed);
     return failed == 0 ? 0 : 1;
 }
