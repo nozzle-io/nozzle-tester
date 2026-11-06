@@ -1,6 +1,7 @@
 #include "core/evidence.hpp"
 #include "core/pattern.hpp"
 #include "gui/pixel_copy.hpp"
+#include "gui/pixel_receive.hpp"
 
 #include <nozzle/nozzle_c.h>
 
@@ -103,16 +104,6 @@ void glfw_error_callback(int error, const char *description) {
 nozzle_tester::tester_format current_format(const gui_state &state) {
     const int format_index = state.format_index < 0 ? 0 : state.format_index % 4;
     return formats[format_index];
-}
-
-bool from_nozzle_format(NozzleTextureFormat format, nozzle_tester::tester_format &out_format) {
-    switch(format) {
-        case NOZZLE_FORMAT_RGBA8_UNORM: out_format = nozzle_tester::tester_format::rgba8_unorm; return true;
-        case NOZZLE_FORMAT_BGRA8_UNORM: out_format = nozzle_tester::tester_format::bgra8_unorm; return true;
-        case NOZZLE_FORMAT_RGBA16_FLOAT: out_format = nozzle_tester::tester_format::rgba16_float; return true;
-        case NOZZLE_FORMAT_RGBA32_FLOAT: out_format = nozzle_tester::tester_format::rgba32_float; return true;
-        default: return false;
-    }
 }
 
 nozzle_tester::test_case make_test_case(const gui_state &state) {
@@ -315,16 +306,15 @@ bool receive_one_frame(gui_state &state) {
     }
 
     nozzle_tester::tester_format observed_format{};
-    if(!from_nozzle_format(info.format, observed_format)) {
+    if(!nozzle_tester::gui_received_format(info.format, observed_format)) {
         nozzle_frame_release(frame);
         state.last_error = "unsupported_observed_format";
         return false;
     }
 
-    const uint32_t bytes_per_pixel = nozzle_tester::bytes_per_pixel(observed_format);
-    std::vector<uint8_t> copied((size_t)info.width * info.height * bytes_per_pixel);
+    nozzle_tester::image_buffer image{};
     NozzleMappedPixels copied_pixels{};
-    error = nozzle_frame_copy_pixels_with_origin(frame, NOZZLE_ORIGIN_TOP_LEFT, copied.data(), copied.size(), &copied_pixels);
+    error = nozzle_tester::copy_gui_received_image(frame, info, image, copied_pixels);
     nozzle_frame_release(frame);
     if(error != NOZZLE_OK) {
         state.last_error = error_text("copy_pixels_failed", error);
@@ -332,11 +322,6 @@ bool receive_one_frame(gui_state &state) {
     }
     state.last_error.clear();
 
-    nozzle_tester::image_buffer image{};
-    image.width = info.width;
-    image.height = info.height;
-    image.format = observed_format;
-    image.bytes = copied;
     upload_preview_texture(state, image.width, image.height, nozzle_tester::image_to_rgba8_preview(image));
 
     nozzle_tester::test_case expected = make_test_case(state);
