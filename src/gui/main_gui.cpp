@@ -1,7 +1,7 @@
 #include "core/evidence.hpp"
 #include "core/pattern.hpp"
 #include "gui/pixel_copy.hpp"
-#include "gui/pixel_receive.hpp"
+#include "core/received_image.hpp"
 
 #include <nozzle/nozzle_c.h>
 
@@ -306,7 +306,7 @@ bool receive_one_frame(gui_state &state) {
     }
 
     nozzle_tester::tester_format observed_format{};
-    if(!nozzle_tester::gui_received_format(info.format, observed_format)) {
+    if(!nozzle_tester::received_format(info.format, observed_format)) {
         nozzle_frame_release(frame);
         state.last_error = "unsupported_observed_format";
         return false;
@@ -314,7 +314,7 @@ bool receive_one_frame(gui_state &state) {
 
     nozzle_tester::image_buffer image{};
     NozzleMappedPixels copied_pixels{};
-    error = nozzle_tester::copy_gui_received_image(frame, info, image, copied_pixels);
+    error = nozzle_tester::copy_received_image(frame, info, image, copied_pixels);
     nozzle_frame_release(frame);
     if(error != NOZZLE_OK) {
         state.last_error = error_text("copy_pixels_failed", error);

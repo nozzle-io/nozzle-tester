@@ -1,8 +1,13 @@
-#include "gui/pixel_receive.hpp"
+#include "core/received_image.hpp"
+#include <cerrno>
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <unistd.h>
+
+extern char **environ;
 
 namespace {
 struct resources {
@@ -93,7 +98,7 @@ bool run_case(NozzleTextureFormat requested, uint32_t width, bool bottom) {
     if(!ok(nozzle_frame_get_info(peer.read, &info), "frame info")) return false;
     nozzle_tester::image_buffer image{};
     NozzleMappedPixels copied{};
-    const NozzleErrorCode error = nozzle_tester::copy_gui_received_image(peer.read, info, image, copied);
+    const NozzleErrorCode error = nozzle_tester::copy_received_image(peer.read, info, image, copied);
     std::printf("GUI_RECEIVE_METADATA requested=%d native=%d info=%d semantic=%d copied=%d native_stride=%lld copy_stride=%lld size=%ux3 bottom=%d error=%d\n",
         (int)requested, (int)storage, (int)info.format, (int)info.semantic_format, (int)copied.format,
         (long long)native_stride, (long long)copied.row_stride_bytes, width, bottom, (int)error);
@@ -130,7 +135,35 @@ bool run_case(NozzleTextureFormat requested, uint32_t width, bool bottom) {
     return true;
 }
 
-bool run_verdict_case(NozzleTextureFormat requested, uint32_t width) {
+bool run_cli_receiver(const char *cli, const std::string &name, uint32_t width,
+                      nozzle_tester::tester_format expected_format, int expected_exit) {
+    std::vector<std::string> args = {cli, "receiver", "--name", name, "--width", std::to_string(width),
+        "--height", "33", "--format", nozzle_tester::format_to_string(expected_format),
+        "--frames", "1", "--timeout-ms", "3000"};
+    std::vector<char *> argv;
+    for(auto &arg : args) argv.push_back(arg.data());
+    argv.push_back(nullptr);
+    pid_t pid{};
+    const int spawn_error = posix_spawn(&pid, cli, nullptr, nullptr, argv.data(), environ);
+    if(spawn_error != 0) {
+        std::fprintf(stderr, "CLI receiver spawn error=%d\n", spawn_error);
+        return false;
+    }
+    int status{};
+    pid_t waited;
+    do { waited = waitpid(pid, &status, 0); } while(waited < 0 && errno == EINTR);
+    const int exit_code = waited == pid && WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    std::printf("CLI_RECEIVE_VERDICT expected_format=%s width=%u exit=%d expected_exit=%d\n",
+        nozzle_tester::format_to_string(expected_format), width, exit_code, expected_exit);
+    return exit_code == expected_exit;
+}
+
+bool has_reason(const nozzle_tester::verify_result &result, const char *reason) {
+    for(const auto &actual : result.failure_reasons) if(actual == reason) return true;
+    return false;
+}
+
+bool run_verdict_case(NozzleTextureFormat requested, uint32_t width, const char *cli) {
     resources peer;
     const std::string name = "v230-" + std::to_string(getpid()) + "-" + std::to_string(requested)
         + "-" + std::to_string(width);
@@ -148,7 +181,7 @@ bool run_verdict_case(NozzleTextureFormat requested, uint32_t width) {
     source.width = width;
     source.height = 33;
     source.frame_index = 1; // Core's first successful commit is frame 1.
-    if(!nozzle_tester::gui_received_format(mapped.format, source.format)) return false;
+    if(!nozzle_tester::received_format(mapped.format, source.format)) return false;
     const auto pattern = nozzle_tester::generate_pattern(source);
     const size_t row_bytes = width * nozzle_tester::bytes_per_pixel(source.format);
     if(!mapped.data || mapped.width != width || mapped.height != source.height ||
@@ -170,9 +203,9 @@ bool run_verdict_case(NozzleTextureFormat requested, uint32_t width) {
     nozzle_tester::image_buffer image{};
     NozzleMappedPixels copied{};
     if(!ok(nozzle_frame_get_info(peer.read, &info), "verdict frame info") ||
-       !ok(nozzle_tester::copy_gui_received_image(peer.read, info, image, copied), "verdict copy")) return false;
+       !ok(nozzle_tester::copy_received_image(peer.read, info, image, copied), "verdict copy")) return false;
     nozzle_tester::test_case expected = source;
-    if(!nozzle_tester::gui_received_format(requested, expected.format)) return false;
+    if(!nozzle_tester::received_format(requested, expected.format)) return false;
     expected.frame_index = info.frame_index; // Same as the GUI and CLI receiver.
     const auto result = nozzle_tester::verify_pattern(image, expected);
     std::printf("GUI_RECEIVE_VERDICT requested=%d storage=%d semantic=%d width=%u frame=%llu result=%s reasons=",
@@ -180,12 +213,41 @@ bool run_verdict_case(NozzleTextureFormat requested, uint32_t width) {
         (unsigned long long)info.frame_index, nozzle_tester::verdict_to_string(result.result));
     for(const auto &reason : result.failure_reasons) std::printf("%s,", reason.c_str());
     std::printf("\n");
-    return image.bytes == pattern.bytes && image.format == source.format && info.frame_index == source.frame_index &&
-        result.result == nozzle_tester::verdict::pass;
+    bool pass = image.bytes == pattern.bytes && image.format == source.format && info.frame_index == source.frame_index &&
+        image.semantic_format == expected.format && result.result == nozzle_tester::verdict::pass;
+    auto unknown_semantic_info = info;
+    unknown_semantic_info.semantic_format = NOZZLE_FORMAT_UNKNOWN;
+    nozzle_tester::image_buffer rejected{};
+    NozzleMappedPixels rejected_pixels{};
+    pass = pass && nozzle_tester::copy_received_image(peer.read, unknown_semantic_info, rejected, rejected_pixels)
+        == NOZZLE_ERROR_UNSUPPORTED_FORMAT && rejected.bytes.empty();
+    const auto swapped = nozzle_tester::verify_pattern(nozzle_tester::make_rb_swap_fixture(image), expected);
+    const auto flipped = nozzle_tester::verify_pattern(nozzle_tester::make_vertical_flip_fixture(image), expected);
+    const auto alpha = nozzle_tester::verify_pattern(nozzle_tester::make_alpha_zero_fixture(image), expected);
+    pass = pass && swapped.result == nozzle_tester::verdict::fail && has_reason(swapped, "rb_swap") &&
+        flipped.result == nozzle_tester::verdict::fail && has_reason(flipped, "vertical_flip") &&
+        alpha.result == nozzle_tester::verdict::fail && has_reason(alpha, "alpha_mismatch");
+    auto wrong_format = expected;
+    wrong_format.format = requested == NOZZLE_FORMAT_RGBA16_FLOAT ? nozzle_tester::tester_format::rgba8_unorm
+        : nozzle_tester::tester_format::rgba16_float;
+    const auto mismatch = nozzle_tester::verify_pattern(image, wrong_format);
+    pass = pass && mismatch.result == nozzle_tester::verdict::fail && has_reason(mismatch, "format_mismatch");
+    // Release the in-process frame before the real CLI receiver acquires it.
+    nozzle_frame_release(peer.read);
+    peer.read = nullptr;
+    const bool cli_pass = run_cli_receiver(cli, name, width, expected.format, 0);
+    const bool cli_rejects = run_cli_receiver(cli, name, width, wrong_format.format, 1);
+    std::printf("GUI_RECEIVE_CONTROLS requested=%d width=%u corruption_and_format=%s\n",
+        (int)requested, width, pass ? "PASS" : "FAIL");
+    return pass && cli_pass && cli_rejects;
 }
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    if(argc != 2) {
+        std::fprintf(stderr, "CLI executable path required\n");
+        return 1;
+    }
     int failed = 0;
     for(uint32_t width : {65u, 641u}) {
         for(auto format : {NOZZLE_FORMAT_RGBA8_UNORM, NOZZLE_FORMAT_BGRA8_UNORM,
@@ -203,7 +265,7 @@ int main() {
     for(uint32_t width : {65u, 641u}) {
         for(auto format : {NOZZLE_FORMAT_RGBA8_UNORM, NOZZLE_FORMAT_BGRA8_UNORM,
                            NOZZLE_FORMAT_RGBA16_FLOAT, NOZZLE_FORMAT_RGBA32_FLOAT}) {
-            if(!run_verdict_case(format, width)) ++failed;
+            if(!run_verdict_case(format, width, argv[1])) ++failed;
         }
     }
     std::printf("GUI_RECEIVE_PEER failed=%d total=25\n", failed);

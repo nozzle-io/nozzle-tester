@@ -1,5 +1,6 @@
 #include "core/evidence.hpp"
 #include "core/pattern.hpp"
+#include "core/received_image.hpp"
 
 #include <nozzle/nozzle_c.h>
 
@@ -200,16 +201,6 @@ NozzleTextureFormat to_nozzle_format(nozzle_tester::tester_format format) {
         case nozzle_tester::tester_format::rgba16_float: return NOZZLE_FORMAT_RGBA16_FLOAT;
         case nozzle_tester::tester_format::rgba32_float: return NOZZLE_FORMAT_RGBA32_FLOAT;
         default: return NOZZLE_FORMAT_UNKNOWN;
-    }
-}
-
-bool from_nozzle_format(NozzleTextureFormat format, nozzle_tester::tester_format &out_format) {
-    switch(format) {
-        case NOZZLE_FORMAT_RGBA8_UNORM: out_format = nozzle_tester::tester_format::rgba8_unorm; return true;
-        case NOZZLE_FORMAT_BGRA8_UNORM: out_format = nozzle_tester::tester_format::bgra8_unorm; return true;
-        case NOZZLE_FORMAT_RGBA16_FLOAT: out_format = nozzle_tester::tester_format::rgba16_float; return true;
-        case NOZZLE_FORMAT_RGBA32_FLOAT: out_format = nozzle_tester::tester_format::rgba32_float; return true;
-        default: return false;
     }
 }
 
@@ -722,28 +713,22 @@ int run_receiver(const cli_options &options) {
             break;
         }
         nozzle_tester::tester_format observed_format{};
-        if(!from_nozzle_format(info.format, observed_format)) {
+        if(!nozzle_tester::received_format(info.format, observed_format)) {
             nozzle_frame_release(nozzle_frame);
             all_passed = false;
             record.verification.result = nozzle_tester::verdict::fail;
             record.verification.failure_reasons.push_back("unsupported_observed_format");
             break;
         }
-        const uint32_t bpp = nozzle_tester::bytes_per_pixel(observed_format);
-        std::vector<uint8_t> copied((size_t)info.width * info.height * bpp);
+        nozzle_tester::image_buffer image{};
         NozzleMappedPixels copied_pixels{};
-        error = nozzle_frame_copy_pixels_with_origin(nozzle_frame, NOZZLE_ORIGIN_TOP_LEFT, copied.data(), copied.size(), &copied_pixels);
+        error = nozzle_tester::copy_received_image(nozzle_frame, info, image, copied_pixels);
         nozzle_frame_release(nozzle_frame);
         if(error != NOZZLE_OK) {
             all_passed = false;
             break;
         }
 
-        nozzle_tester::image_buffer image{};
-        image.width = info.width;
-        image.height = info.height;
-        image.format = observed_format;
-        image.bytes = copied;
         nozzle_tester::test_case expected = record.test;
         expected.format = options.format;
         expected.frame_index = info.frame_index;
@@ -769,6 +754,7 @@ int run_receiver(const cli_options &options) {
     } else if(all_passed) {
         record.verification.result = nozzle_tester::verdict::pass;
         record.verification.dimensions_ok = true;
+        record.verification.format_ok = true;
         record.verification.orientation_ok = true;
         record.verification.channel_order_ok = true;
         record.verification.alpha_ok = true;

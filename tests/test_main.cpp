@@ -154,6 +154,33 @@ void test_non_zero_frame_index_oracle() {
     check(has_reason(loop_counter_result, "stale_frame") || has_reason(loop_counter_result, "pixel_mismatch"), "non-zero frame mismatch is structured");
 }
 
+void test_semantic_format_comparison() {
+    nozzle_tester::test_case expected{};
+    expected.width = 65;
+    expected.height = 33;
+    expected.frame_index = 1;
+    auto storage = expected;
+    storage.format = nozzle_tester::tester_format::bgra8_unorm;
+    auto image = nozzle_tester::generate_pattern(storage);
+    image.semantic_format = expected.format;
+    const auto good = nozzle_tester::verify_pattern(image, expected);
+    check(good.result == nozzle_tester::verdict::pass && good.format_ok,
+        "BGRA storage with RGBA semantics verifies without relabeling");
+    check(image.format == nozzle_tester::tester_format::bgra8_unorm, "verification preserves storage format");
+    const auto swapped = nozzle_tester::verify_pattern(nozzle_tester::make_rb_swap_fixture(image), expected);
+    check(swapped.result == nozzle_tester::verdict::fail && has_reason(swapped, "rb_swap"),
+        "semantic metadata does not hide swapped channels");
+    expected.format = nozzle_tester::tester_format::rgba16_float;
+    const auto wrong_semantics = nozzle_tester::verify_pattern(image, expected);
+    check(wrong_semantics.result == nozzle_tester::verdict::fail && has_reason(wrong_semantics, "format_mismatch"),
+        "different semantic precision still fails");
+    image.bytes.pop_back();
+    expected.format = nozzle_tester::tester_format::rgba8_unorm;
+    const auto truncated = nozzle_tester::verify_pattern(image, expected);
+    check(truncated.result == nozzle_tester::verdict::fail && has_reason(truncated, "byte_size_mismatch"),
+        "storage byte size remains checked with semantic metadata");
+}
+
 void test_evidence_json() {
     nozzle_tester::test_case test{};
     test.id = "unit-json";
@@ -190,6 +217,7 @@ int main() {
     test_byte_size_validation();
     test_dimension_and_format_mismatch_reasons();
     test_non_zero_frame_index_oracle();
+    test_semantic_format_comparison();
     test_evidence_json();
     if(failures != 0) {
         std::fprintf(stderr, "%d test failure(s)\n", failures);

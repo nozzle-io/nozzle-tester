@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -40,6 +41,8 @@ struct image_buffer {
     uint32_t height{0};
     tester_format format{tester_format::rgba8_unorm};
     std::vector<uint8_t> bytes;
+    // Received frames carry semantic metadata; untagged CPU fixtures use format.
+    std::optional<tester_format> semantic_format;
 };
 
 struct verify_result {
