@@ -1,9 +1,9 @@
-# GUI receive copied-layout investigation
+# Receiver storage and semantic format checks
 
-The macOS-only native peer calls the same `copy_gui_received_image` used by
-`receive_one_frame`. This helper is a behavior-preserving extraction: allocation
-and image interpretation still use `NozzleFrameInfo.format`, not the returned
-copy format. No speculative R/B swap or precision conversion is introduced.
+The macOS-only native peer calls the same `copy_received_image` used by GUI
+`receive_one_frame` and CLI `run_receiver`. Allocation and byte interpretation use
+`NozzleFrameInfo.format`; the original 17 checks compare this against returned
+copy metadata. No R/B swap or precision conversion is introduced.
 The returned metadata points at the owned image bytes, not the helper's temporary
 vector. Frame ownership remains with the caller.
 
@@ -25,15 +25,55 @@ and low float32 bits. A real R8 frame verifies explicit unsupported rejection.
 Logs show requested/native/frame-info/semantic/copied formats and native/copied
 strides. Missing Metal or setup failures fail, with no SKIP.
 
-This is an investigation baseline, not a claimed layout fix. If the existing
-construction passes, report the bounded agreement instead of inventing a failing
-reproduction. If it fails numerically, retain that CI evidence before any repair.
-No all-backend invariant follows from these cases: external/native publication,
-sRGB, other formats, Windows/Linux GPU runtime, cross-process transport and GUI
-window interaction are not covered. Both producer origins still use a top-left
-receiver copy. The existing CLI and GUI sender tests remain separate.
+The verdict regression additionally generates a pattern in actual mapped storage
+at 65x33/641x33, publishes it as frame 1 (the core's first committed index), and
+calls the real `verify_pattern` with the requested format and received frame index,
+as GUI/CLI receivers do. It asserts PASS and exact copied bytes for all four
+requested formats. This failing-first extension leaves the production comparison
+unchanged in the negative baseline `6e77f47`: CI establishes whether requested
+RGBA8 is rejected as BGRA8 storage.
+These additional cases use the pattern generator; the original 17 copy cases do
+not. Copy agreement alone does not establish user-facing verdict correctness.
+
+The repair retains storage in `image_buffer.format` and received semantics in
+`image_buffer.semantic_format`. `verify_pattern` compares expected format with
+semantics, while byte size and decoding still use storage. CPU fixtures/raw-file
+verification without transport metadata keep their original storage comparison.
+Stored GUI image copies retain semantics for subsequent capture checks.
+
+The first repair's rejection of UNKNOWN raw semantics was a regression: nozzle-dev#226
+documents valid external publishers with raw UNKNOWN and resolved BGRA8 semantics.
+Negative baseline `4735f97` replaces synthetic UNKNOWN rejection with real public
+`sender.publish_external_texture(frame.get_texture())` publishers. It asserts raw
+UNKNOWN and resolved BGRA8 for 65x33/641x33, then requires helper and CLI PASS for
+BGRA8 and format-mismatch rejection for RGBA16F. A real external R8 frame remains
+unsupported. Source ownership is retained until all receivers finish. The raw
+UNKNOWN assertion intentionally requires updating when the pinned core advances
+past #226; compatibility with current/older publishers must remain covered.
+
+Compatibility rule (shared with Blender receive): only when raw semantics are
+UNKNOWN, call `nozzle_frame_get_resolved_format` and use its semantic format.
+Preserve explicit semantics. Propagate resolver errors; reject still-UNKNOWN or
+unsupported resolved semantics. This receiver repair does not fix core publication
+metadata. The external R8 case verifies rejection of a real unsupported resolved
+format; no injected resolver-error or still-UNKNOWN backend result is claimed.
+
+Each generated native case also checks genuine format mismatch, channel swap,
+vertical flip and alpha corruption rejection. The native producer remains alive while a real
+CLI child receives its committed frame; matching expectations must exit 0 and
+wrong semantic precision must exit 1. CLI JSON is printed in the CI log, including
+its format check. These child processes exercise the actual CLI receive path,
+not tester's normal sender (whose payload/index alignment is the next separate
+repair, nozzle-dev#233, before the GUI evidence work).
+
+No all-backend invariant follows: arbitrary external textures, GL publication, sRGB,
+other formats, Windows/Linux GPU runtime and GUI window interaction remain
+uncovered. Both producer origins use a top-left receiver copy. The original copy
+and GUI-helper verdict checks are same-process; only the CLI child checks are
+cross-process. No ordinary tester-to-tester loopback success is claimed.
 
 The target is registered only on Apple platforms; test binaries are not packaged.
 The existing GUI build on all three CI operating systems checks helper integration,
 not native receive runtime on non-macOS. GUI evidence truthfulness is separate
-nozzle-dev#224; this test does not validate its displayed PASS or capture records.
+nozzle-dev#224; this test covers the shared verdict computation, not GUI controls,
+capture provenance/file I/O, or screenshot evidence.

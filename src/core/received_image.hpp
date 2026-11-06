@@ -5,7 +5,7 @@
 
 namespace nozzle_tester {
 
-inline bool gui_received_format(NozzleTextureFormat format, tester_format &out) {
+inline bool received_format(NozzleTextureFormat format, tester_format &out) {
     switch(format) {
         case NOZZLE_FORMAT_RGBA8_UNORM: out = tester_format::rgba8_unorm; return true;
         case NOZZLE_FORMAT_BGRA8_UNORM: out = tester_format::bgra8_unorm; return true;
@@ -15,12 +15,23 @@ inline bool gui_received_format(NozzleTextureFormat format, tester_format &out) 
     }
 }
 
-// Existing GUI receive construction, shared with the native peer without
-// substituting a test conversion. copied_pixels exposes the core copy metadata.
-inline NozzleErrorCode copy_gui_received_image(NozzleFrame *frame, const NozzleFrameInfo &info,
-                                              image_buffer &image, NozzleMappedPixels &copied_pixels) {
+// Shared GUI/CLI receive construction. Storage determines decoding; semantic
+// format determines the requested-format check. Never relabel the copied bytes.
+inline NozzleErrorCode copy_received_image(NozzleFrame *frame, const NozzleFrameInfo &info,
+                                          image_buffer &image, NozzleMappedPixels &copied_pixels) {
     tester_format observed_format{};
-    if(!gui_received_format(info.format, observed_format)) return NOZZLE_ERROR_UNSUPPORTED_FORMAT;
+    tester_format semantic_format{};
+    NozzleTextureFormat semantic = info.semantic_format;
+    // Current/older external publishers may leave raw semantics UNKNOWN (#226).
+    // Resolve that case through core, never overwrite explicit semantics.
+    if(semantic == NOZZLE_FORMAT_UNKNOWN) {
+        NozzleResolvedTextureFormat resolved{};
+        const auto error = nozzle_frame_get_resolved_format(frame, &resolved);
+        if(error != NOZZLE_OK) return error;
+        semantic = resolved.semantic_format;
+    }
+    if(!received_format(info.format, observed_format) ||
+       !received_format(semantic, semantic_format)) return NOZZLE_ERROR_UNSUPPORTED_FORMAT;
     const uint32_t bpp = bytes_per_pixel(observed_format);
     std::vector<uint8_t> copied(static_cast<size_t>(info.width) * info.height * bpp);
     const NozzleErrorCode error = nozzle_frame_copy_pixels_with_origin(
@@ -29,6 +40,7 @@ inline NozzleErrorCode copy_gui_received_image(NozzleFrame *frame, const NozzleF
     image.width = info.width;
     image.height = info.height;
     image.format = observed_format;
+    image.semantic_format = semantic_format;
     image.bytes = copied;
     // The local copy vector is gone on return; never expose its borrowed pointer.
     copied_pixels.data = image.bytes.data();
