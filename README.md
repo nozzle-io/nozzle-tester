@@ -96,8 +96,10 @@ The GUI provides:
 - live preview, frame counters, FPS estimate, dropped-frame counter, and backend/path evidence fields;
 - `Capture evidence`, which saves the frozen receive-time record as `nozzle-tester-gui-evidence.json`. When a received snapshot exists, it also writes its unchanged raw bytes to `nozzle-tester-gui-capture.raw` and derives `nozzle-tester-gui-preview.rgba` from those same bytes. Without a snapshot it writes JSON only, with receiver checks marked INCONCLUSIVE. Generated previews and successful sends are not receiver verification.
 
-GUI output uses schema `0.2.0`; CLI output remains `0.1.0`. Stop/restart clears
-the received snapshot. A failed artifact or JSON write is reported in capture
+GUI output uses schema `0.2.0`; CLI output remains `0.1.0`. User Stop/restart clears
+the received snapshot; automatic failure teardown retains it for diagnosis.
+Capture includes the latest publication result even when retaining an older
+received frame. A failed artifact or JSON write is reported in capture
 status, and failed artifacts are not listed as written. See
 [the schema](docs/evidence-schema.md#gui-020) for provenance and partial-write limits.
 

@@ -33,9 +33,9 @@ int main() {
     test.format = tester_format::rgba32_float;
     const auto image = generate_pattern(test);
     gui_evidence_state state;
-    record_gui_generated(state, image, test, "source", "sender", 1);
+    record_gui_generated(state, test, "source", "sender", 1);
     emit("sender", state);
-    record_gui_generated(state, image, test, "source", "gui-preview", 0);
+    record_gui_generated(state, test, "source", "gui-preview", 0);
     auto capture = capture_gui_evidence(state, "source");
     emit("generated_capture", state, capture.success);
 
@@ -43,7 +43,7 @@ int main() {
     auto changed = test;
     changed.width = 123;
     changed.frame_index = 90;
-    record_gui_generated(state, generate_pattern(changed), changed, "changed-channel", "gui-preview", 0);
+    record_gui_generated(state, changed, "changed-channel", "gui-preview", 0);
     capture = capture_gui_evidence(state, "frozen");
     std::vector<uint8_t> raw;
     std::vector<uint8_t> preview;
@@ -82,8 +82,8 @@ int main() {
     bool running = true;
     int released = 0;
     const auto bad = make_rb_swap_fixture(image);
-    tick_gui_runtime(sequence, 3, running, [&] {
-        record_gui_generated(sequence, image, test, "original-channel", "loopback-sender", 1);
+    tick_gui_runtime(3, running, [&] {
+        record_gui_generated(sequence, test, "original-channel", "loopback-sender", 1);
         return true;
     }, [&] {
         receive(sequence, bad, test);
@@ -97,7 +97,7 @@ int main() {
     clear_gui_observation(sequence);
     running = true;
     released = 0;
-    tick_gui_runtime(sequence, 1, running, [&] {
+    tick_gui_runtime(1, running, [&] {
         record_gui_publication_failure(sequence, test, "failed-sender", "sender", 2, "commit_failed");
         return false;
     }, [] { return true; }, [&] { ++released; });
@@ -109,6 +109,21 @@ int main() {
     record_gui_publication_failure(sequence, test, "original-channel", "loopback-sender", 2, "commit_failed");
     capture = capture_gui_evidence(sequence, "mixed");
     emit("mixed_publication", sequence, capture.success);
+
+    running = true;
+    released = 0;
+    int receive_calls = 0;
+    tick_gui_runtime(3, running, [&] {
+        record_gui_publication_failure(sequence, test, "original-channel", "loopback-sender", 2, "commit_failed");
+        return false;
+    }, [&] { ++receive_calls; return true; }, [&] { ++released; });
+    capture = capture_gui_evidence(sequence, "mixed-sequence");
+    raw.clear();
+    emit("mixed_sequence", sequence, capture.success, !running && released == 1 && receive_calls == 0
+        && read_binary_file("mixed-sequence-capture.raw", raw) && raw == image.bytes);
+    stop_gui_runtime(sequence, running, [] {});
+    capture = capture_gui_evidence(sequence, "explicit-stop");
+    emit("explicit_stop_after_failure", sequence, capture.success);
 
     auto mismatch = test;
     mismatch.width += 1;

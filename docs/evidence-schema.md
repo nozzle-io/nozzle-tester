@@ -58,7 +58,9 @@ pretend generated pixels are received evidence:
   `no_received_observation`, and observed dimensions/index/count and mismatch
   count are JSON null. A sender's successful commit is a separate
   `publication: {succeeded: true, published_count: N}` fact. Publication failure
-  sets succeeded false and records its error; absent publication is null.
+  sets succeeded false and records `publication.error`; absent publication is
+  null. This object also identifies its own sender_name and role. It represents
+  the latest publication attempt, separately from the frozen received frame.
 - With a received snapshot, `provenance` is `received`. Its expected settings,
   channel/role, observed dimensions/index/count, verification result and owned
   raw CPU bytes are copied at receive time. Runtime channel/loopback identity
@@ -69,10 +71,21 @@ pretend generated pixels are received evidence:
   Raw half/float bytes are never narrowed. Generated previews/published source
   patterns are not cached as received images and produce no received artifacts.
   A subsequent preview regeneration does not replace an existing received
-  snapshot. Stop/restart clears it; the last on-screen diagnostic may remain
+  snapshot. Explicit user Stop or starting/restarting clears it and the latest
+  publication result; the last on-screen diagnostic may remain
   visible, but a capture after stop has no old received payload or metadata.
+  Automatic failure teardown only releases runtime handles: a bad loopback
+  frame remains capturable as FAIL, with its raw bytes. Publication failure
+  likewise remains capturable. If an older good frame exists, capture preserves
+  that received frame/result AND reports the latest failed publication attempt;
+  its error is not inserted into that older frame's pixel failure reasons.
 - `native_texture_format` stays unknown; the copy's storage format is only
   `cpu_evidence_format`. It is not inferred to be the native texture format.
+- Dimension/format mismatch and malformed byte size return before pixel
+  comparisons. In those cases the overall verdict remains FAIL with the actual
+  reason, dimension/format checks retain their measured results, but orientation,
+  channel order, alpha, stale-frame and stride checks are INCONCLUSIVE and
+  mismatch_count is null. This does not alter the shared CLI verifier contract.
 - `changed_across_observations` is null and `temporal_progress_reason` is
   `not_measured`. `stale_frame` is the existing single-image pattern comparison
   against the previous index, not proof of temporal progress. No count-based
@@ -96,6 +109,11 @@ file I/O on CI, including bad pixels, immutable float payload/preview, stop,
 source-only capture, and partial/JSON write failure. It is not GUI-window or GPU
 transport smoke. Negative baseline `4e12796` produces six failures out of nine
 assertions; the repair adds three focused publication/partial-write controls.
+Follow-up negative `fe31bbc` adds the production tick/teardown path and fails
+six of eighteen assertions. The failure-lifecycle repair adds mixed loopback
+teardown and explicit Stop-after-failure controls (twenty assertions total).
+Release callbacks are tracked, not native handle destruction in a GUI process;
+the GUI uses the same dispatch/teardown functions with its real release callback.
 
 ## Build metadata
 

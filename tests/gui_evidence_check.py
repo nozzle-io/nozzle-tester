@@ -47,6 +47,7 @@ def main():
               and frozen["cpu_evidence_format"] == "rgba32_float")
         stopped = cases["stopped_capture"]["record"]
         check("stop_clears_snapshot", stopped["frame"]["observed_count"] is None
+              and stopped["publication"] is None
               and not Path(directory, "stopped-capture.raw").exists())
         failed = cases["failed_write"]
         check("write_failure_visible", not failed["capture_success"]
@@ -62,7 +63,9 @@ def main():
               and json_failed["record"]["capture_errors"] == ["write_failed: jsonfail-evidence.json"]
               and len(json_failed["record"]["artifacts"]) == 2)
         publication = cases["publication_failure"]["record"]
-        check("publication_failure", publication["publication"] == {"succeeded": False, "published_count": 2}
+        check("publication_failure", publication["publication"]["succeeded"] is False
+              and publication["publication"]["published_count"] == 2
+              and publication["publication"]["error"] == "commit_failed"
               and publication["role"] == "loopback-sender" and publication["sender_name"] == "failed-sender"
               and publication["verdict"] == "INCONCLUSIVE"
               and all(v == "INCONCLUSIVE" for v in publication["checks"].values()))
@@ -87,15 +90,29 @@ def main():
               and mixed["frame"]["observed_index"] == 7
               and pub.get("succeeded") is False and pub.get("error") == "commit_failed"
               and any(a["role"] == "received_raw" for a in mixed["artifacts"]))
+        sequence = cases["mixed_sequence"]
+        record = sequence["record"]
+        check("mixed_failure_teardown", sequence["capture_success"] and sequence["raw_matches"]
+              and record["verdict"] == "PASS" and record["frame"]["observed_index"] == 7
+              and record["role"] == "loopback-receiver"
+              and record["publication"]["succeeded"] is False
+              and record["publication"]["error"] == "commit_failed"
+              and record["publication"]["role"] == "loopback-sender")
+        stopped = cases["explicit_stop_after_failure"]["record"]
+        check("explicit_stop_after_failure", stopped["publication"] is None
+              and stopped["frame"]["observed_count"] is None and not stopped["artifacts"]
+              and not Path(directory, "explicit-stop-capture.raw").exists())
         for name, reason in (("dimension_early_return", "dimension_mismatch"),
                              ("format_early_return", "format_mismatch"),
                              ("bytes_early_return", "byte_size_mismatch")):
             record = cases[name]["record"]
             check(name, record["verdict"] == "FAIL" and reason in record["failure_reasons"]
+                  and record["checks"]["dimensions"] == ("FAIL" if name == "dimension_early_return" else "PASS")
+                  and record["checks"]["format"] == ("FAIL" if name == "format_early_return" else "PASS")
                   and all(record["checks"][k] == "INCONCLUSIVE" for k in
                           ("orientation", "channel_order", "alpha", "stale_frame", "stride_or_stretch"))
                   and record["mismatch_count"] is None)
-    print(f"GUI_EVIDENCE failed={failures} total=18")
+    print(f"GUI_EVIDENCE failed={failures} total=20")
     return 1 if failures else 0
 
 

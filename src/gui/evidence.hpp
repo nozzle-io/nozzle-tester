@@ -4,11 +4,19 @@
 
 namespace nozzle_tester {
 
+struct gui_publication_record {
+    bool succeeded{false};
+    uint64_t published_count{0};
+    std::string role;
+    std::string sender_name;
+    std::string error;
+};
+
 struct gui_record {
     evidence_record evidence;
     bool received{false};
-    std::optional<bool> publication_succeeded;
-    uint64_t published_count{0};
+    bool pixel_checks_measured{false};
+    std::optional<gui_publication_record> publication;
     std::vector<std::string> capture_errors;
 };
 
@@ -20,6 +28,7 @@ struct gui_snapshot {
 struct gui_evidence_state {
     gui_record current;
     std::optional<gui_snapshot> received;
+    std::optional<gui_publication_record> latest_publication;
     std::string json;
     std::string verdict_text{"INCONCLUSIVE"};
 };
@@ -29,7 +38,7 @@ struct gui_capture_result {
     std::string status;
 };
 
-void record_gui_generated(gui_evidence_state &state, const image_buffer &image,
+void record_gui_generated(gui_evidence_state &state,
     const test_case &test, const std::string &channel, const std::string &role, uint64_t published_count);
 void record_gui_received(gui_evidence_state &state, const image_buffer &image,
     evidence_record record, const std::string &channel);

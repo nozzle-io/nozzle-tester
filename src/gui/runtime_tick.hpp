@@ -5,21 +5,21 @@
 namespace nozzle_tester {
 
 template<class Release>
-void destroy_gui_runtime(gui_evidence_state &evidence, bool &running, Release release) {
-    clear_gui_observation(evidence);
+void destroy_gui_runtime(bool &running, Release release) {
     release();
     running = false;
 }
 
 template<class Release>
 void stop_gui_runtime(gui_evidence_state &evidence, bool &running, Release release) {
-    destroy_gui_runtime(evidence, running, release);
+    destroy_gui_runtime(running, release);
+    clear_gui_observation(evidence);
 }
 
 // The production dispatch and failure teardown, with transport operations supplied
 // by the GUI. Tests use the same sequence with CPU observations and tracked release.
 template<class Publish, class Receive, class Release>
-void tick_gui_runtime(gui_evidence_state &evidence, int mode, bool &running,
+void tick_gui_runtime(int mode, bool &running,
     Publish publish, Receive receive, Release release) {
     if(!running) return;
     bool ok = true;
@@ -29,7 +29,7 @@ void tick_gui_runtime(gui_evidence_state &evidence, int mode, bool &running,
         ok = publish();
         if(ok) ok = receive();
     }
-    if(!ok && mode != 2) destroy_gui_runtime(evidence, running, release);
+    if(!ok && mode != 2) destroy_gui_runtime(running, release);
 }
 
 } // namespace nozzle_tester

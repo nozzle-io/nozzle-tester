@@ -136,7 +136,7 @@ void update_pattern_preview(gui_state &state) {
     const nozzle_tester::image_buffer image = nozzle_tester::generate_pattern(test);
     const std::vector<uint8_t> preview = nozzle_tester::image_to_rgba8_preview(image);
     upload_preview_texture(state, image.width, image.height, preview);
-    nozzle_tester::record_gui_generated(state.evidence, image, test, state.channel_name, "gui-preview", 0);
+    nozzle_tester::record_gui_generated(state.evidence, test, state.channel_name, "gui-preview", 0);
 }
 
 void release_runtime_handles(gui_state &state) {
@@ -151,7 +151,7 @@ void release_runtime_handles(gui_state &state) {
 }
 
 void destroy_runtime(gui_state &state) {
-    nozzle_tester::destroy_gui_runtime(state.evidence, state.running, [&] { release_runtime_handles(state); });
+    nozzle_tester::destroy_gui_runtime(state.running, [&] { release_runtime_handles(state); });
 }
 
 void stop_runtime(gui_state &state) {
@@ -219,7 +219,7 @@ bool publish_one_frame(gui_state &state) {
     upload_preview_texture(state, image.width, image.height, preview);
     state.published_count += 1;
     state.frame_index = (int)test.frame_index;
-    nozzle_tester::record_gui_generated(state.evidence, image, test, state.runtime_channel,
+    nozzle_tester::record_gui_generated(state.evidence, test, state.runtime_channel,
         state.runtime_loopback ? "loopback-sender" : "sender", state.published_count);
     return true;
 }
@@ -290,7 +290,7 @@ bool receive_one_frame(gui_state &state) {
 
 void tick_runtime(gui_state &state) {
     if(!state.running) return;
-    nozzle_tester::tick_gui_runtime(state.evidence, state.mode_index, state.running,
+    nozzle_tester::tick_gui_runtime(state.mode_index, state.running,
         [&] { return publish_one_frame(state); }, [&] { return receive_one_frame(state); },
         [&] { release_runtime_handles(state); });
     const auto now = std::chrono::steady_clock::now();
