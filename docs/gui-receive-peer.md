@@ -41,15 +41,22 @@ semantics, while byte size and decoding still use storage. CPU fixtures/raw-file
 verification without transport metadata keep their original storage comparison.
 Stored GUI image copies retain semantics for subsequent capture checks.
 
-The first repair's rejection of UNKNOWN raw semantics is a regression: nozzle-dev#226
+The first repair's rejection of UNKNOWN raw semantics was a regression: nozzle-dev#226
 documents valid external publishers with raw UNKNOWN and resolved BGRA8 semantics.
-The next negative baseline replaces synthetic UNKNOWN rejection with real public
+Negative baseline `4735f97` replaces synthetic UNKNOWN rejection with real public
 `sender.publish_external_texture(frame.get_texture())` publishers. It asserts raw
 UNKNOWN and resolved BGRA8 for 65x33/641x33, then requires helper and CLI PASS for
 BGRA8 and format-mismatch rejection for RGBA16F. A real external R8 frame remains
 unsupported. Source ownership is retained until all receivers finish. The raw
 UNKNOWN assertion intentionally requires updating when the pinned core advances
 past #226; compatibility with current/older publishers must remain covered.
+
+Compatibility rule (shared with Blender receive): only when raw semantics are
+UNKNOWN, call `nozzle_frame_get_resolved_format` and use its semantic format.
+Preserve explicit semantics. Propagate resolver errors; reject still-UNKNOWN or
+unsupported resolved semantics. This receiver repair does not fix core publication
+metadata. The external R8 case verifies rejection of a real unsupported resolved
+format; no injected resolver-error or still-UNKNOWN backend result is claimed.
 
 Each generated native case also checks genuine format mismatch, channel swap,
 vertical flip and alpha corruption rejection. The native producer remains alive while a real

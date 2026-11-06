@@ -21,8 +21,17 @@ inline NozzleErrorCode copy_received_image(NozzleFrame *frame, const NozzleFrame
                                           image_buffer &image, NozzleMappedPixels &copied_pixels) {
     tester_format observed_format{};
     tester_format semantic_format{};
+    NozzleTextureFormat semantic = info.semantic_format;
+    // Current/older external publishers may leave raw semantics UNKNOWN (#226).
+    // Resolve that case through core, never overwrite explicit semantics.
+    if(semantic == NOZZLE_FORMAT_UNKNOWN) {
+        NozzleResolvedTextureFormat resolved{};
+        const auto error = nozzle_frame_get_resolved_format(frame, &resolved);
+        if(error != NOZZLE_OK) return error;
+        semantic = resolved.semantic_format;
+    }
     if(!received_format(info.format, observed_format) ||
-       !received_format(info.semantic_format, semantic_format)) return NOZZLE_ERROR_UNSUPPORTED_FORMAT;
+       !received_format(semantic, semantic_format)) return NOZZLE_ERROR_UNSUPPORTED_FORMAT;
     const uint32_t bpp = bytes_per_pixel(observed_format);
     std::vector<uint8_t> copied(static_cast<size_t>(info.width) * info.height * bpp);
     const NozzleErrorCode error = nozzle_frame_copy_pixels_with_origin(
