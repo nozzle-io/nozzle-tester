@@ -44,6 +44,7 @@ void print_usage(const char *program) {
     std::fprintf(stderr, "  --output PATH --input PATH --evidence PATH\n");
     std::fprintf(stderr, "Sender/receiver options:\n");
     std::fprintf(stderr, "  --name NAME --frames N --timeout-ms N --delay-ms N --hold-ms N\n");
+    std::fprintf(stderr, "  Sender --timeout-ms bounds busy-ring retries per successful frame (0: no retry).\n");
     std::fprintf(stderr, "  --sender-pattern nozzle-tester|juce-quadrants\n");
     std::fprintf(stderr, "Discovery options:\n");
     std::fprintf(stderr, "  discover [--name NAME] [--timeout-ms N]\n");
@@ -603,11 +604,29 @@ int run_sender(const cli_options &options) {
 
     uint32_t published = 0;
     uint64_t last_payload_index = 0;
+    uint64_t commit_attempts = 0;
+    uint64_t busy_timeouts = 0;
     std::string publish_failure_reason;
-    for(uint32_t frame = 0; frame < options.frames; frame++) {
+    auto progress_start = std::chrono::steady_clock::now();
+    const auto retry_busy = [&] {
+        busy_timeouts += 1;
+        const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - progress_start).count();
+        if(static_cast<uint64_t>(elapsed) >= options.timeout_ms) return false;
+        const auto remaining = options.timeout_ms - static_cast<uint64_t>(elapsed);
+        std::this_thread::sleep_for(std::chrono::milliseconds(
+            std::min<uint64_t>(std::max(1u, options.delay_ms), remaining)));
+        return std::chrono::steady_clock::now() - progress_start < std::chrono::milliseconds(options.timeout_ms);
+    };
+    while(published < options.frames) {
         NozzleFrame *writable = nullptr;
         error = nozzle_sender_acquire_writable_frame(sender, options.width, options.height, to_nozzle_format(options.format), &writable);
         if(error != NOZZLE_OK || writable == nullptr) {
+            if(error == NOZZLE_ERROR_TIMEOUT) {
+                if(retry_busy()) continue;
+                publish_failure_reason = "acquire_busy_timeout";
+                break;
+            }
             std::fprintf(stderr, "acquire_writable_frame_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
             publish_failure_reason = std::string("acquire_writable_frame_failed:") + nozzle_error_name(error);
             break;
@@ -624,7 +643,7 @@ int run_sender(const cli_options &options) {
             break;
         }
 
-        const uint64_t payload_index = static_cast<uint64_t>(frame) + 1u;
+        const uint64_t payload_index = commit_attempts + 1u;
         const nozzle_tester::image_buffer image = generate_sender_image(options, payload_index);
         if(!write_image_to_mapping(image, pixels)) {
             std::fprintf(stderr, "write_image_to_mapping_failed: storage format %s for requested %s\n", texture_format_name(pixels.format), nozzle_tester::format_to_string(options.format));
@@ -634,14 +653,27 @@ int run_sender(const cli_options &options) {
             nozzle_frame_release(writable);
             break;
         }
-        if(frame == 0u) {
+        if(published == 0u) {
             log_sender_mapping_samples(options, image, pixels);
         }
 
-        nozzle_pixel_mapping_unlock(&mapping);
+        error = nozzle_pixel_mapping_unlock_checked(&mapping);
+        if(error != NOZZLE_OK) {
+            publish_failure_reason = std::string("unlock_pixels_failed:") + nozzle_error_name(error);
+            nozzle_sender_discard_frame(sender, writable);
+            nozzle_frame_release(writable);
+            break;
+        }
+        commit_attempts += 1;
         error = nozzle_sender_commit_frame(sender, writable);
+        if(error != NOZZLE_OK) nozzle_sender_discard_frame(sender, writable);
         nozzle_frame_release(writable);
         if(error != NOZZLE_OK) {
+            if(error == NOZZLE_ERROR_TIMEOUT) {
+                if(retry_busy()) continue;
+                publish_failure_reason = "commit_busy_timeout";
+                break;
+            }
             std::fprintf(stderr, "commit_frame_failed: %s (%d)\n", nozzle_error_name(error), (int)error);
             publish_failure_reason = std::string("commit_frame_failed:") + nozzle_error_name(error);
             break;
@@ -651,7 +683,11 @@ int run_sender(const cli_options &options) {
         if(0 < options.delay_ms) {
             std::this_thread::sleep_for(std::chrono::milliseconds(options.delay_ms));
         }
+        progress_start = std::chrono::steady_clock::now();
     }
+
+    std::fprintf(stderr, "sender_progress published=%u requested=%u busy_timeouts=%llu\n",
+        published, options.frames, (unsigned long long)busy_timeouts);
 
     if(published == options.frames && published != 0) {
         std::fprintf(stderr, "sender_ready published_count=%u payload_frame_index=%llu\n",
