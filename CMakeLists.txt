@@ -67,6 +67,9 @@ target_compile_options(nozzle_tester_core PRIVATE
 )
 
 add_executable(nozzle-tester-cli src/cli/main.cpp)
+if(MINGW)
+    target_link_options(nozzle-tester-cli PRIVATE -municode)
+endif()
 target_link_libraries(nozzle-tester-cli PRIVATE nozzle_tester_core nozzle)
 target_compile_options(nozzle-tester-cli PRIVATE
     $<$<CXX_COMPILER_ID:Clang,AppleClang>:-Wall -Wextra -Wpedantic>

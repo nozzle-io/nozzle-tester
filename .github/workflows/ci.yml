@@ -77,6 +77,11 @@ jobs:
       - name: Test
         run: ctest --test-dir build --build-config Release --verbose
 
+      - name: Windows Unicode sender discovery and receiver identity
+        if: runner.os == 'Windows'
+        timeout-minutes: 2
+        run: python tests/windows_cli_utf8.py --exe build/Release/nozzle-tester-cli.exe
+
       - name: Verify universal binaries
         if: runner.os == 'macOS'
         shell: bash
