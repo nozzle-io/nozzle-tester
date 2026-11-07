@@ -1,3 +1,5 @@
+#include "windows_utf8_argv.hpp"
+
 #include "core/evidence.hpp"
 #include "core/pattern.hpp"
 #include "core/received_image.hpp"
@@ -871,7 +873,18 @@ int run_discover(const cli_options &options) {
 
 } // namespace
 
+#if defined(_WIN32)
+int wmain(int argc, wchar_t **wide_argv) {
+    windows_utf8_argv converted;
+    if(!converted.assign(argc, wide_argv)) {
+        std::fprintf(stderr, "Invalid UTF-16 command line (Win32 error %lu)\n",
+            static_cast<unsigned long>(GetLastError()));
+        return 2;
+    }
+    char **argv = converted.data();
+#else
 int main(int argc, char **argv) {
+#endif
     cli_options options{};
     if(!parse_options(argc, argv, options)) {
         print_usage(argv[0]);

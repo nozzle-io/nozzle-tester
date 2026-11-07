@@ -6,6 +6,10 @@
 #include <cstring>
 #include <limits>
 
+#if defined(_WIN32)
+#include <filesystem>
+#endif
+
 namespace nozzle_tester {
 
 namespace {
@@ -421,7 +425,11 @@ image_buffer make_alpha_zero_fixture(const image_buffer &source) {
 }
 
 bool write_binary_file(const std::string &path, const std::vector<uint8_t> &bytes) {
+#if defined(_WIN32)
+    std::FILE *file = _wfopen(std::filesystem::u8path(path).c_str(), L"wb");
+#else
     std::FILE *file = std::fopen(path.c_str(), "wb");
+#endif
     if(file == nullptr) return false;
     const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), file);
     const int close_result = std::fclose(file);
@@ -429,7 +437,11 @@ bool write_binary_file(const std::string &path, const std::vector<uint8_t> &byte
 }
 
 bool read_binary_file(const std::string &path, std::vector<uint8_t> &out_bytes) {
+#if defined(_WIN32)
+    std::FILE *file = _wfopen(std::filesystem::u8path(path).c_str(), L"rb");
+#else
     std::FILE *file = std::fopen(path.c_str(), "rb");
+#endif
     if(file == nullptr) return false;
     std::fseek(file, 0, SEEK_END);
     const long size = std::ftell(file);
