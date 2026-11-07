@@ -84,7 +84,7 @@ int main() {
     const auto bad = make_rb_swap_fixture(image);
     tick_gui_runtime(3, running, [&] {
         record_gui_generated(sequence, test, "original-channel", "loopback-sender", 1);
-        return true;
+        return gui_publish_status::published;
     }, [&] {
         receive(sequence, bad, test);
         return false;
@@ -99,7 +99,7 @@ int main() {
     released = 0;
     tick_gui_runtime(1, running, [&] {
         record_gui_publication_failure(sequence, test, "failed-sender", "sender", 2, "commit_failed");
-        return false;
+        return gui_publish_status::failed;
     }, [] { return true; }, [&] { ++released; });
     capture = capture_gui_evidence(sequence, "publish-sequence");
     emit("publish_sequence", sequence, capture.success, !running && released == 1);
@@ -115,7 +115,7 @@ int main() {
     int receive_calls = 0;
     tick_gui_runtime(3, running, [&] {
         record_gui_publication_failure(sequence, test, "original-channel", "loopback-sender", 2, "commit_failed");
-        return false;
+        return gui_publish_status::failed;
     }, [&] { ++receive_calls; return true; }, [&] { ++released; });
     capture = capture_gui_evidence(sequence, "mixed-sequence");
     raw.clear();
@@ -124,6 +124,28 @@ int main() {
     stop_gui_runtime(sequence, running, [] {});
     capture = capture_gui_evidence(sequence, "explicit-stop");
     emit("explicit_stop_after_failure", sequence, capture.success);
+
+    // Scripted transport outcomes exercise dispatch/evidence, not GPU behavior.
+    for(int mode : {1, 3}) {
+        clear_gui_observation(sequence);
+        running = true;
+        released = 0;
+        receive_calls = 0;
+        uint64_t published = 2;
+        tick_gui_runtime(mode, running, [&] {
+            record_gui_publication_failure(sequence, test, "busy-sender", "sender", published, "acquire_timeout");
+            return gui_publish_status::retry_later;
+        }, [&] { ++receive_calls; return false; }, [&] { ++released; });
+        emit(mode == 1 ? "busy_sender" : "busy_loopback", sequence, true,
+            running && released == 0 && receive_calls == 0 && published == 2);
+        tick_gui_runtime(mode, running, [&] {
+            ++published;
+            record_gui_generated(sequence, test, "busy-sender", "sender", published);
+            return gui_publish_status::published;
+        }, [&] { ++receive_calls; return true; }, [&] { ++released; });
+        emit(mode == 1 ? "busy_sender_recovered" : "busy_loopback_recovered", sequence, true,
+            running && released == 0 && receive_calls == (mode == 3 ? 1 : 0) && published == 3);
+    }
 
     auto mismatch = test;
     mismatch.width += 1;

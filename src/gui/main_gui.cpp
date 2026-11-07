@@ -39,6 +39,8 @@ struct gui_state {
     NozzleSender *sender{nullptr};
     NozzleReceiver *receiver{nullptr};
     uint64_t published_count{0};
+    uint64_t commit_attempts{0};
+    std::chrono::steady_clock::time_point next_publish{};
     uint64_t observed_count{0};
     uint64_t dropped_count{0};
     double fps{0.0};
@@ -162,6 +164,8 @@ bool start_runtime(gui_state &state) {
     stop_runtime(state);
     state.last_error.clear();
     state.published_count = 0;
+    state.commit_attempts = 0;
+    state.next_publish = {};
     state.observed_count = 0;
     state.dropped_count = 0;
     state.fps = 0.0;
@@ -199,9 +203,12 @@ bool start_runtime(gui_state &state) {
     return true;
 }
 
-bool publish_one_frame(gui_state &state) {
-    if(state.sender == nullptr) return false;
-    const auto publication = nozzle_tester::publish_gui_pattern(state.sender, make_test_case(state), state.published_count);
+nozzle_tester::gui_publish_status publish_one_frame(gui_state &state) {
+    using nozzle_tester::gui_publish_status;
+    if(state.sender == nullptr) return gui_publish_status::failed;
+    if(std::chrono::steady_clock::now() < state.next_publish) return gui_publish_status::retry_later;
+    const auto publication = nozzle_tester::publish_gui_pattern(state.sender, make_test_case(state), state.commit_attempts);
+    if(publication.commit_attempted) state.commit_attempts += 1;
     if(publication.failed_stage != nullptr) {
         state.last_error = publication.error == NOZZLE_OK && std::strcmp(publication.failed_stage, "writable_mapping_failed") == 0
             ? "writable_mapping_failed: invalid mapped pixels"
@@ -209,7 +216,10 @@ bool publish_one_frame(gui_state &state) {
         nozzle_tester::record_gui_publication_failure(state.evidence, publication.test,
             state.runtime_channel, state.runtime_loopback ? "loopback-sender" : "sender",
             state.published_count, state.last_error);
-        return false;
+        if(publication.status == gui_publish_status::retry_later) {
+            state.next_publish = std::chrono::steady_clock::now() + std::chrono::milliseconds(10);
+        }
+        return publication.status;
     }
     const auto &test = publication.test;
     const auto &image = publication.image;
@@ -221,7 +231,7 @@ bool publish_one_frame(gui_state &state) {
     state.frame_index = (int)test.frame_index;
     nozzle_tester::record_gui_generated(state.evidence, test, state.runtime_channel,
         state.runtime_loopback ? "loopback-sender" : "sender", state.published_count);
-    return true;
+    return gui_publish_status::published;
 }
 
 bool receive_one_frame(gui_state &state) {

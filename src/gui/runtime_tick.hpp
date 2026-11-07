@@ -4,6 +4,8 @@
 
 namespace nozzle_tester {
 
+enum class gui_publish_status { published, retry_later, failed };
+
 template<class Release>
 void destroy_gui_runtime(bool &running, Release release) {
     release();
@@ -23,11 +25,13 @@ void tick_gui_runtime(int mode, bool &running,
     Publish publish, Receive receive, Release release) {
     if(!running) return;
     bool ok = true;
-    if(mode == 1) ok = publish();
-    else if(mode == 2) ok = receive();
-    else if(mode == 3) {
-        ok = publish();
-        if(ok) ok = receive();
+    if(mode == 1 || mode == 3) {
+        const auto status = publish();
+        if(status == gui_publish_status::retry_later) return;
+        ok = status == gui_publish_status::published;
+        if(ok && mode == 3) ok = receive();
+    } else if(mode == 2) {
+        ok = receive();
     }
     if(!ok && mode != 2) destroy_gui_runtime(running, release);
 }

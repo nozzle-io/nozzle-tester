@@ -1,6 +1,7 @@
 #pragma once
 
 #include "gui/pixel_copy.hpp"
+#include "gui/runtime_tick.hpp"
 
 namespace nozzle_tester {
 
@@ -9,20 +10,25 @@ struct gui_publication {
     image_buffer image;
     NozzleErrorCode error{NOZZLE_OK};
     const char *failed_stage{nullptr};
+    gui_publish_status status{gui_publish_status::failed};
+    bool commit_attempted{false};
 };
 
 // Non-UI portion of publish_one_frame, also exercised by the native peer.
-// A fresh sender starts at frame 1. Callers must abandon the session on failure:
-// a late backend commit failure can advance core's counter without publication.
-inline gui_publication publish_gui_pattern(NozzleSender *sender, test_case test, uint64_t published_count) {
+// A fresh sender starts at frame 1. A timed-out commit advances the recorded
+// core's sequence, but is not a successful publication; acquisition does neither.
+inline gui_publication publish_gui_pattern(NozzleSender *sender, test_case test, uint64_t commit_attempts) {
     gui_publication result{};
-    test.frame_index = published_count + 1u;
+    test.frame_index = commit_attempts + 1u;
     result.test = test;
     result.image = generate_pattern(test);
     NozzleFrame *writable = nullptr;
     result.failed_stage = "acquire_writable_frame_failed";
     result.error = nozzle_sender_acquire_writable_frame(sender, test.width, test.height, gui_image_format(test.format), &writable);
-    if(result.error != NOZZLE_OK || writable == nullptr) return result;
+    if(result.error != NOZZLE_OK || writable == nullptr) {
+        if(result.error == NOZZLE_ERROR_TIMEOUT) result.status = gui_publish_status::retry_later;
+        return result;
+    }
 
     NozzlePixelMapping *mapping = nullptr;
     NozzleMappedPixels pixels{};
@@ -44,10 +50,16 @@ inline gui_publication publish_gui_pattern(NozzleSender *sender, test_case test,
         return result;
     }
     result.failed_stage = "commit_frame_failed";
+    result.commit_attempted = true;
     result.error = nozzle_sender_commit_frame(sender, writable);
     if(result.error != NOZZLE_OK) nozzle_sender_discard_frame(sender, writable);
     nozzle_frame_release(writable);
-    if(result.error == NOZZLE_OK) result.failed_stage = nullptr;
+    if(result.error == NOZZLE_OK) {
+        result.failed_stage = nullptr;
+        result.status = gui_publish_status::published;
+    } else if(result.error == NOZZLE_ERROR_TIMEOUT) {
+        result.status = gui_publish_status::retry_later;
+    }
     return result;
 }
 

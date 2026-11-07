@@ -108,6 +108,19 @@ def main():
         check("explicit_stop_after_failure", stopped["publication"] is None
               and stopped["frame"]["observed_count"] is None and not stopped["artifacts"]
               and not Path(directory, "explicit-stop-capture.raw").exists())
+        for mode in ("sender", "loopback"):
+            busy = cases[f"busy_{mode}"]
+            check(f"busy_{mode}_retains_session", busy["raw_matches"]
+                  and busy["record"]["publication"]["succeeded"] is False
+                  and busy["record"]["publication"]["published_count"] == 2
+                  and busy["record"]["publication"]["error"] == "acquire_timeout"
+                  and busy["record"]["verdict"] == "INCONCLUSIVE"
+                  and busy["record"]["frame"]["observed_count"] is None)
+            recovered = cases[f"busy_{mode}_recovered"]
+            check(f"busy_{mode}_resumes", recovered["raw_matches"]
+                  and recovered["record"]["publication"]["succeeded"] is True
+                  and recovered["record"]["publication"]["published_count"] == 3
+                  and recovered["record"]["verdict"] == "INCONCLUSIVE")
         for name, reason in (("dimension_early_return", "dimension_mismatch"),
                              ("format_early_return", "format_mismatch"),
                              ("bytes_early_return", "byte_size_mismatch")):
@@ -118,7 +131,7 @@ def main():
                   and all(record["checks"][k] == "INCONCLUSIVE" for k in
                           ("orientation", "channel_order", "alpha", "stale_frame", "stride_or_stretch"))
                   and record["mismatch_count"] is None)
-    print(f"GUI_EVIDENCE failed={failures} total=20")
+    print(f"GUI_EVIDENCE failed={failures} total=24")
     return 1 if failures else 0
 
 
