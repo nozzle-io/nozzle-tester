@@ -3,6 +3,10 @@
 #include <cstdio>
 #include <sstream>
 
+#if defined(_WIN32)
+#include <filesystem>
+#endif
+
 namespace nozzle_tester {
 
 #ifndef NOZZLE_TESTER_REPO_SHA
@@ -138,7 +142,11 @@ std::string make_evidence_json(const evidence_record &record) {
 }
 
 bool write_text_file(const std::string &path, const std::string &text) {
+#if defined(_WIN32)
+    std::FILE *file = _wfopen(std::filesystem::u8path(path).c_str(), L"wb");
+#else
     std::FILE *file = std::fopen(path.c_str(), "wb");
+#endif
     if(file == nullptr) return false;
     const size_t written = std::fwrite(text.data(), 1, text.size(), file);
     const int close_result = std::fclose(file);

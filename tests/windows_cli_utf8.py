@@ -46,6 +46,25 @@ def main():
     check_invalid_utf16(args.exe)
     name = "\u65e5\u672c \U0001f680 \"252\"-" + uuid.uuid4().hex[:8]
     with tempfile.TemporaryDirectory(prefix="nozzle-argv-") as directory:
+        unicode_dir = Path(directory) / "\u65e5\u672c-\U0001f680"
+        unicode_dir.mkdir()
+        raw_path = unicode_dir / "\u753b\U0001f680.rgba"
+        for command, path_option, evidence_name in (
+            ("pattern", "--output", "\u51fa\U0001f680.json"),
+            ("verify", "--input", "\u5165\U0001f680.json"),
+        ):
+            evidence_path = unicode_dir / evidence_name
+            result, out, err = run(args.exe, command, path_option, str(raw_path),
+                "--width", "320", "--height", "240", "--format", "rgba8_unorm",
+                "--frame", "7", "--evidence", str(evidence_path))
+            if result.returncode != 0:
+                raise AssertionError(f"Unicode-path {command} failed: {out!r} {err!r}")
+            record = json.loads(evidence_path.read_text(encoding="utf-8"))
+            if (record["verdict"] != "PASS" or record["role"] != command
+                    or record["artifact_paths"] != [str(raw_path)]
+                    or record["frame"]["observed_index"] != 7
+                    or raw_path.stat().st_size != 320 * 240 * 4):
+                raise AssertionError(f"Unicode-path {command} evidence mismatch: {record!r}")
         log_path = Path(directory) / "sender.stderr.log"
         with log_path.open("wb") as log:
             sender = subprocess.Popen([
@@ -81,7 +100,7 @@ def main():
                 stop(sender)
                 if sender.returncode != 0:
                     print(f"sender stderr={log_path.read_bytes()!r}")
-    print("PASS Windows Unicode sender/discovery/receiver identity and pixels; strict rejection")
+    print("PASS Windows Unicode identity, pixels and input/output/evidence paths; strict rejection")
 
 
 if __name__ == "__main__":
