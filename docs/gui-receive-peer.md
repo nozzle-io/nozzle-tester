@@ -7,7 +7,7 @@ copy metadata. No R/B swap or precision conversion is introduced.
 The returned metadata points at the owned image bytes, not the helper's temporary
 vector. Frame ownership remains with the caller.
 
-Pinned core `f3a31335bec3d714bf0dcdac39307ebba89fa266`:
+Original core baseline `f3a31335bec3d714bf0dcdac39307ebba89fa266`:
 
 - `src/c_api/nozzle_c.cpp::nozzle_frame_copy_pixels_with_origin` maps, copies and
   checks unlock. `copy_mapped_pixels_to_buffer` packs rows according to the actual
@@ -41,21 +41,33 @@ semantics, while byte size and decoding still use storage. CPU fixtures/raw-file
 verification without transport metadata keep their original storage comparison.
 Stored GUI image copies retain semantics for subsequent capture checks.
 
-The first repair's rejection of UNKNOWN raw semantics was a regression: nozzle-dev#226
-documents valid external publishers with raw UNKNOWN and resolved BGRA8 semantics.
-Negative baseline `4735f97` replaces synthetic UNKNOWN rejection with real public
-`sender.publish_external_texture(frame.get_texture())` publishers. It asserts raw
-UNKNOWN and resolved BGRA8 for 65x33/641x33, then requires helper and CLI PASS for
-BGRA8 and format-mismatch rejection for RGBA16F. A real external R8 frame remains
-unsupported. Source ownership is retained until all receivers finish. The raw
-UNKNOWN assertion intentionally requires updating when the pinned core advances
-past #226; compatibility with current/older publishers must remain covered.
+The first repair's rejection of UNKNOWN raw semantics was a regression: the
+historical negative baseline `4735f97` used real public
+`sender.publish_external_texture(frame.get_texture())` publishers with raw UNKNOWN
+and resolved BGRA8 semantics. Core #226, merged as
+`8e4dd2571bcc0c1f14a076da93f668c22d2ee907`, normalizes those publication semantics.
+The current fixture therefore requires raw and resolved semantics to equal actual
+storage: BGRA8 at 65x33/641x33, and R8 at 65x33. Helper and CLI must accept BGRA8,
+reject a requested RGBA16F mismatch, and continue rejecting unsupported R8.
+Source ownership is retained until all receivers finish.
+
+Legacy compatibility is a separate, explicitly injected helper regression.
+`EXTERNAL_RECEIVE_LEGACY_INJECTED` passes a copy of the real frame info with only
+`semantic_format` changed to UNKNOWN. It uses the same real frame and resolved
+format: BGRA8 must produce identical bytes and effective BGRA8 semantics; R8 must
+remain unsupported with an empty image. `EXTERNAL_RECEIVE_EXPLICIT_INJECTED`
+passes explicit RGBA8 semantics on the BGRA8 frame and requires those semantics
+to remain RGBA8 while storage and copied bytes remain BGRA8. Resolving every
+explicit value back to BGRA8 would fail this control. These are helper metadata
+injections, not old-binary publisher, transport mutation, or frame-only semantic
+handoff evidence. The CLI children see only the actual normalized publication.
+The controls extend the existing external cases, not the 28-case summary count.
 
 Compatibility rule (shared with Blender receive): only when raw semantics are
 UNKNOWN, call `nozzle_frame_get_resolved_format` and use its semantic format.
 Preserve explicit semantics. Propagate resolver errors; reject still-UNKNOWN or
-unsupported resolved semantics. This receiver repair does not fix core publication
-metadata. The external R8 case verifies rejection of a real unsupported resolved
+unsupported resolved semantics. Production compatibility handling is unchanged.
+The external R8 case verifies rejection of a real unsupported resolved
 format; no injected resolver-error or still-UNKNOWN backend result is claimed.
 
 Each generated native case also checks genuine format mismatch, channel swap,

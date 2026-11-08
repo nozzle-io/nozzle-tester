@@ -293,8 +293,8 @@ bool run_external_case(uint32_t width, bool mono, const char *cli) {
     std::printf("EXTERNAL_RECEIVE_METADATA width=%u raw=%d resolved=%d storage=%d frame=%llu\n",
         width, (int)info.semantic_format, (int)resolved.semantic_format, (int)resolved.storage_format,
         (unsigned long long)info.frame_index);
-    // Intentional pinned-core assertion: #226 must update this fixture when fixed.
-    if(info.semantic_format != NOZZLE_FORMAT_UNKNOWN || resolved.semantic_format != expected_storage ||
+    // Current publication carries normalized semantics after core #226.
+    if(info.semantic_format != expected_storage || resolved.semantic_format != expected_storage ||
        resolved.storage_format != expected_storage || info.frame_index != expected.frame_index) return false;
     nozzle_tester::image_buffer image{};
     NozzleMappedPixels copied{};
@@ -315,6 +315,41 @@ bool run_external_case(uint32_t width, bool mono, const char *cli) {
         }
     }
     std::printf("EXTERNAL_RECEIVE_HELPER width=%u mono=%d copy_error=%d %s\n", width, mono, (int)error, pass ? "PASS" : "FAIL");
+
+    // Inject only the helper's metadata argument. The real frame, its resolved
+    // format and shared publication are unchanged; this is not an old publisher.
+    auto legacy_info = info;
+    legacy_info.semantic_format = NOZZLE_FORMAT_UNKNOWN;
+    nozzle_tester::image_buffer legacy_image{};
+    NozzleMappedPixels legacy_copied{};
+    const auto legacy_error = nozzle_tester::copy_received_image(
+        observer.read, legacy_info, legacy_image, legacy_copied);
+    const bool legacy_pass = mono
+        ? legacy_error == NOZZLE_ERROR_UNSUPPORTED_FORMAT && legacy_image.bytes.empty()
+        : legacy_error == NOZZLE_OK && legacy_image.format == expected.format &&
+          legacy_image.semantic_format == expected.format && legacy_image.bytes == pattern.bytes &&
+          legacy_copied.format == expected_storage && legacy_copied.data == legacy_image.bytes.data();
+    std::printf("EXTERNAL_RECEIVE_LEGACY_INJECTED width=%u mono=%d raw=%d resolved=%d copy_error=%d %s\n",
+        width, mono, (int)legacy_info.semantic_format, (int)resolved.semantic_format,
+        (int)legacy_error, legacy_pass ? "PASS" : "FAIL");
+    pass = pass && legacy_pass;
+
+    if(!mono) {
+        auto explicit_info = info;
+        explicit_info.semantic_format = NOZZLE_FORMAT_RGBA8_UNORM;
+        nozzle_tester::image_buffer explicit_image{};
+        NozzleMappedPixels explicit_copied{};
+        const auto explicit_error = nozzle_tester::copy_received_image(
+            observer.read, explicit_info, explicit_image, explicit_copied);
+        const bool explicit_pass = explicit_error == NOZZLE_OK &&
+            explicit_image.format == expected.format &&
+            explicit_image.semantic_format == nozzle_tester::tester_format::rgba8_unorm &&
+            explicit_image.bytes == pattern.bytes && explicit_copied.format == expected_storage;
+        std::printf("EXTERNAL_RECEIVE_EXPLICIT_INJECTED width=%u raw=%d resolved=%d copy_error=%d %s\n",
+            width, (int)explicit_info.semantic_format, (int)resolved.semantic_format,
+            (int)explicit_error, explicit_pass ? "PASS" : "FAIL");
+        pass = pass && explicit_pass;
+    }
     nozzle_frame_release(observer.read);
     observer.read = nullptr;
     // Run the real CLI even if the helper fails, so the negative CI proves both.

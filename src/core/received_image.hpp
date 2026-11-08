@@ -22,7 +22,7 @@ inline NozzleErrorCode copy_received_image(NozzleFrame *frame, const NozzleFrame
     tester_format observed_format{};
     tester_format semantic_format{};
     NozzleTextureFormat semantic = info.semantic_format;
-    // Current/older external publishers may leave raw semantics UNKNOWN (#226).
+    // Preserve compatibility with legacy or unspecified UNKNOWN raw semantics.
     // Resolve that case through core, never overwrite explicit semantics.
     if(semantic == NOZZLE_FORMAT_UNKNOWN) {
         NozzleResolvedTextureFormat resolved{};
