@@ -26,7 +26,7 @@ std::string make_gui_json(const gui_record &value) {
     const auto check = [&](bool pass) { return !value.received ? "INCONCLUSIVE" : pass ? "PASS" : "FAIL"; };
     const auto pixel_check = [&](bool pass) { return !value.pixel_checks_measured ? "INCONCLUSIVE" : check(pass); };
     std::ostringstream out;
-    out << "{\n\"schema_version\":\"0.2.0\",\"tool\":\"nozzle-tester\",\"tool_version\":\"0.1.0\",\n";
+    out << "{\n\"schema_version\":\"0.4.0\",\"tool\":\"nozzle-tester\",\"tool_version\":\"0.1.0\",\n";
     out << "\"repo_sha\":" << quoted(NOZZLE_TESTER_REPO_SHA)
         << ",\"nozzle_core_sha\":" << quoted(NOZZLE_TESTER_NOZZLE_CORE_SHA)
         << ",\"os\":" << quoted(detect_os_name()) << ",\"backend\":" << quoted(r.backend) << ",\n";
@@ -47,7 +47,7 @@ std::string make_gui_json(const gui_record &value) {
     out << ",\n\"dimensions\":{\"expected_width\":" << r.test.width << ",\"expected_height\":" << r.test.height
         << ",\"observed_width\":" << observed(r.observed_width) << ",\"observed_height\":" << observed(r.observed_height) << "},\n";
     out << "\"frame\":{\"expected_index\":" << r.test.frame_index << ",\"observed_index\":" << observed(r.observed_frame_index)
-        << ",\"observed_count\":" << observed(r.observed_frame_count) << ",\"changed_across_observations\":null},\n";
+        << ",\"observed_count\":" << observed(r.observed_frame_count) << ",\"index_progression\":" << quoted(progression_text(r.progression)) << "},\n";
     out << "\"checks\":{\"orientation\":" << quoted(pixel_check(v.orientation_ok))
         << ",\"channel_order\":" << quoted(pixel_check(v.channel_order_ok)) << ",\"alpha\":" << quoted(pixel_check(v.alpha_ok))
         << ",\"dimensions\":" << quoted(check(v.dimensions_ok)) << ",\"format\":" << quoted(check(v.format_ok))
@@ -56,7 +56,7 @@ std::string make_gui_json(const gui_record &value) {
     out << "\"mismatch_count\":" << (value.pixel_checks_measured ? observed(v.mismatch_count) : "null")
         << ",\"verdict\":" << quoted(value.received ? verdict_to_string(v.result) : "INCONCLUSIVE")
         << ",\"unmeasured_reason\":" << (value.received ? "null" : quoted("no_received_observation")) << ",\n";
-    out << "\"temporal_progress_reason\":\"not_measured\",\"failure_reasons\":";
+    out << "\"failure_reasons\":";
     strings(out, v.failure_reasons);
     out << ",\"capture_errors\":";
     strings(out, value.capture_errors);
@@ -95,6 +95,9 @@ void record_gui_generated(gui_evidence_state &state,
 
 void record_gui_received(gui_evidence_state &state, const image_buffer &image,
     evidence_record record, const std::string &channel) {
+    state.sequence.observe_index(record.observed_frame_index);
+    frame_sequence &frozen_sequence = record;
+    frozen_sequence = state.sequence;
     record.sender_name = channel;
     record.receiver_name = "nozzle-tester-gui";
     record.cpu_evidence_format = format_to_string(image.format);
@@ -121,6 +124,7 @@ void record_gui_publication_failure(gui_evidence_state &state, const test_case &
 }
 
 void clear_gui_observation(gui_evidence_state &state) {
+    state.sequence = {};
     state.received.reset();
     state.latest_publication.reset();
     state.current = {};

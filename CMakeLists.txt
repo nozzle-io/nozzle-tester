@@ -137,7 +137,7 @@ if(NOZZLE_TESTER_BUILD_TESTS)
     target_link_libraries(nozzle_tester_tests PRIVATE nozzle_tester_core)
     add_test(NAME nozzle_tester_unit COMMAND nozzle_tester_tests)
     add_executable(nozzle_tester_gui_evidence_cases tests/gui_evidence_cases.cpp)
-    target_link_libraries(nozzle_tester_gui_evidence_cases PRIVATE nozzle_tester_core)
+    target_link_libraries(nozzle_tester_gui_evidence_cases PRIVATE nozzle_tester_core nozzle)
     add_test(NAME nozzle_tester_gui_evidence
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_evidence_check.py
             --cases $<TARGET_FILE:nozzle_tester_gui_evidence_cases>)

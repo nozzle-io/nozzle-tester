@@ -81,8 +81,10 @@ def main():
         # Validate the actual file, not only the in-memory string.
         disk = json.loads(Path(directory, "frozen-evidence.json").read_text())
         check("gui_schema", disk["schema_version"] == "0.4.0")
-        for name, count, progress in (("repeat_or_first", 2, "repeated"), ("mixed_indices", 3, "nonmonotonic"),
-                                      ("fresh_session", 1, "insufficient"), ("advanced_bad_pixels", 2, "advanced")):
+        for name, count, progress in (("first_index", 1, "insufficient"), ("repeated_index", 2, "repeated"), ("mixed_indices", 3, "nonmonotonic"),
+                                      ("fresh_session", 1, "insufficient"), ("advanced_bad_pixels", 2, "advanced"),
+                                      ("after_timeout", 3, "advanced"), ("disconnected_capture", 3, "advanced"),
+                                      ("reconnected", 1, "insufficient"), ("index_regressed", 2, "nonmonotonic")):
             frame = cases[name]["record"]["frame"]
             check(name, frame["observed_count"] == count and frame.get("index_progression") == progress)
         check("progress_independent_of_pixels", cases["advanced_bad_pixels"]["record"]["verdict"] == "FAIL"
@@ -137,7 +139,7 @@ def main():
                   and all(record["checks"][k] == "INCONCLUSIVE" for k in
                           ("orientation", "channel_order", "alpha", "stale_frame", "stride_or_stretch"))
                   and record["mismatch_count"] is None)
-    print(f"GUI_EVIDENCE failed={failures} total=29")
+    print(f"GUI_EVIDENCE failed={failures} total=34")
     return 1 if failures else 0
 
 

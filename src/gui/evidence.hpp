@@ -26,6 +26,7 @@ struct gui_snapshot {
 };
 
 struct gui_evidence_state {
+    frame_sequence sequence;
     gui_record current;
     std::optional<gui_snapshot> received;
     std::optional<gui_publication_record> latest_publication;

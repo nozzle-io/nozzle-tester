@@ -1,5 +1,6 @@
 #include "gui/evidence.hpp"
 #include "gui/runtime_tick.hpp"
+#include "gui/receive_session.hpp"
 #include <cstdio>
 #include <filesystem>
 
@@ -19,7 +20,6 @@ void receive(gui_evidence_state &state, const image_buffer &image, const test_ca
     record.observed_width = image.width;
     record.observed_height = image.height;
     record.observed_frame_index = test.frame_index;
-    record.observed_frame_count = 1;
     record.verification = verify_pattern(image, test);
     record_gui_received(state, image, record, "original-channel");
 }
@@ -148,10 +148,12 @@ int main() {
     }
 
     clear_gui_observation(sequence);
+    const char *steps[] = {"first_index", "repeated_index", "mixed_indices"};
+    int step = 0;
     for(uint64_t index : {7u, 7u, 10u}) {
         test.frame_index = index;
         receive(sequence, generate_pattern(test), test);
-        emit(index == 10 ? "mixed_indices" : "repeat_or_first", sequence);
+        emit(steps[step++], sequence);
     }
     stop_gui_runtime(sequence, running, [] {});
     test.frame_index = 9;
@@ -163,6 +165,19 @@ int main() {
     receive(sequence, generate_pattern(stale), test);
     capture = capture_gui_evidence(sequence, "stale-advanced");
     emit("advanced_bad_pixels", sequence, capture.success);
+    note_gui_acquire_error(sequence, NOZZLE_ERROR_TIMEOUT);
+    test.frame_index = 15;
+    receive(sequence, generate_pattern(test), test);
+    emit("after_timeout", sequence);
+    note_gui_acquire_error(sequence, NOZZLE_ERROR_SENDER_CLOSED);
+    capture = capture_gui_evidence(sequence, "disconnected");
+    emit("disconnected_capture", sequence, capture.success);
+    test.frame_index = 2;
+    receive(sequence, generate_pattern(test), test);
+    emit("reconnected", sequence);
+    test.frame_index = 1;
+    receive(sequence, generate_pattern(test), test);
+    emit("index_regressed", sequence);
     test.frame_index = 7;
     auto mismatch = test;
     mismatch.width += 1;

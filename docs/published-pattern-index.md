@@ -47,7 +47,6 @@ APIs into that same sender session.
 
 This is not a fix for core#184: tests recreate the receiver too, rather than
 keeping an old connected receiver across in-process sender replacement. There is
-no GUI-window test or non-Metal pixel-runtime claim. CLI evidence aggregation and
-schema concerns remain #234; GUI capture truthfulness remains #224, and editable
-controls/content-freshness policy remains #231. Receiver expectations must not be
+no GUI-window test or non-Metal pixel-runtime claim. See [the evidence schema](evidence-schema.md) for receiver index progression
+and GUI capture semantics. Receiver expectations must not be
 globally decremented to compensate for a producer defect.
