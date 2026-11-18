@@ -46,6 +46,7 @@ struct image_buffer {
 };
 
 struct verify_result {
+    bool pixels_compared{false};
     verdict result{verdict::inconclusive};
     std::vector<std::string> failure_reasons;
     uint64_t mismatch_count{0};

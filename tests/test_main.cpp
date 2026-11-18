@@ -181,6 +181,26 @@ void test_semantic_format_comparison() {
         "storage byte size remains checked with semantic metadata");
 }
 
+// Deterministic index sequences through the same accumulator used by the CLI.
+// Native sequential transports may suppress duplicates before evaluation.
+void test_receiver_progression() {
+    using nozzle_tester::index_progression;
+    nozzle_tester::evidence_record record{};
+    record.observe_index(4);
+    check(record.progression == index_progression::insufficient, "one observation");
+    record.observe_index(4);
+    check(record.progression == index_progression::repeated, "repeated metadata index");
+    record.observe_index(8);
+    check(record.progression == index_progression::nonmonotonic, "mixed repeated and advancing");
+    record = {};
+    record.observe_index(4);
+    record.observe_index(8);
+    check(record.progression == index_progression::advanced, "forward gap");
+    record.observe_index(3);
+    record.observe_index(9);
+    check(record.progression == index_progression::nonmonotonic, "regression retained");
+}
+
 void test_evidence_json() {
     nozzle_tester::test_case test{};
     test.id = "unit-json";
@@ -219,6 +239,7 @@ int main() {
     test_non_zero_frame_index_oracle();
     test_semantic_format_comparison();
     test_evidence_json();
+    test_receiver_progression();
     if(failures != 0) {
         std::fprintf(stderr, "%d test failure(s)\n", failures);
         return 1;

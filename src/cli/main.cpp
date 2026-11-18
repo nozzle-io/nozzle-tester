@@ -732,37 +732,24 @@ int run_receiver(const cli_options &options) {
     record.test.height = options.expected_height;
 
     if(error != NOZZLE_OK || receiver == nullptr) {
-        record.verification.result = nozzle_tester::verdict::fail;
-        record.verification.failure_reasons.push_back("receiver_create_failed");
-        emit_evidence(record, options.evidence_path);
-        return 1;
+        record.transport_error = std::string("receiver_create_failed:") + nozzle_error_name(error);
     }
 
-    uint32_t observed = 0;
-    bool all_passed = true;
-    for(uint32_t frame = 0; frame < options.frames; frame++) {
-        (void)frame;
+    for(uint32_t frame = 0; frame < options.frames && record.transport_error.empty(); ++frame) {
         NozzleAcquireDesc acquire_desc{};
         acquire_desc.timeout_ms = options.timeout_ms;
         NozzleFrame *nozzle_frame = nullptr;
         error = nozzle_receiver_acquire_frame(receiver, &acquire_desc, &nozzle_frame);
         if(error != NOZZLE_OK || nozzle_frame == nullptr) {
-            all_passed = false;
+            record.transport_error = error == NOZZLE_ERROR_TIMEOUT ? "acquire_timeout" :
+                std::string("acquire_failed:") + nozzle_error_name(error);
             break;
         }
         NozzleFrameInfo info{};
         error = nozzle_frame_get_info(nozzle_frame, &info);
         if(error != NOZZLE_OK) {
             nozzle_frame_release(nozzle_frame);
-            all_passed = false;
-            break;
-        }
-        nozzle_tester::tester_format observed_format{};
-        if(!nozzle_tester::received_format(info.format, observed_format)) {
-            nozzle_frame_release(nozzle_frame);
-            all_passed = false;
-            record.verification.result = nozzle_tester::verdict::fail;
-            record.verification.failure_reasons.push_back("unsupported_observed_format");
+            record.transport_error = std::string("frame_info_failed:") + nozzle_error_name(error);
             break;
         }
         nozzle_tester::image_buffer image{};
@@ -770,43 +757,25 @@ int run_receiver(const cli_options &options) {
         error = nozzle_tester::copy_received_image(nozzle_frame, info, image, copied_pixels);
         nozzle_frame_release(nozzle_frame);
         if(error != NOZZLE_OK) {
-            all_passed = false;
+            record.transport_error = std::string("copy_failed:") + nozzle_error_name(error);
             break;
         }
 
-        nozzle_tester::test_case expected = record.test;
-        expected.format = options.format;
-        expected.frame_index = info.frame_index;
-        const nozzle_tester::verify_result verify = nozzle_tester::verify_pattern(image, expected);
-        if(verify.result != nozzle_tester::verdict::pass) {
-            all_passed = false;
-            record.verification = verify;
-        }
+        record.test.frame_index = info.frame_index;
+        record.observe_index(info.frame_index);
+        record.verification = nozzle_tester::verify_pattern(image, record.test);
         record.observed_width = info.width;
         record.observed_height = info.height;
-        record.observed_frame_index = info.frame_index;
-        record.native_texture_format = nozzle_tester::format_to_string(observed_format);
-        record.cpu_evidence_format = nozzle_tester::format_to_string(observed_format);
-        observed += 1;
+        record.cpu_evidence_format = nozzle_tester::format_to_string(image.format);
+        if(record.verification.result != nozzle_tester::verdict::pass) break;
     }
 
-    nozzle_receiver_destroy(receiver);
-    record.observed_frame_count = observed;
-    record.changed_across_observations = 1 < observed;
-    if(observed == 0) {
-        record.verification.result = nozzle_tester::verdict::fail;
-        record.verification.failure_reasons.push_back("missing_frame");
-    } else if(all_passed) {
-        record.verification.result = nozzle_tester::verdict::pass;
-        record.verification.dimensions_ok = true;
-        record.verification.format_ok = true;
-        record.verification.orientation_ok = true;
-        record.verification.channel_order_ok = true;
-        record.verification.alpha_ok = true;
-        record.verification.stale_frame_ok = 1 < observed;
+    if(receiver) nozzle_receiver_destroy(receiver);
+    if(record.transport_error.empty() && record.observed_frame_count == 0) {
+        record.transport_error = "missing_frame";
     }
     emit_evidence(record, options.evidence_path);
-    return record.verification.result == nozzle_tester::verdict::pass ? 0 : 1;
+    return record.transport_error.empty() && record.verification.result == nozzle_tester::verdict::pass ? 0 : 1;
 }
 
 bool sender_array_contains(const NozzleSenderInfoArray &array, const std::string &name) {

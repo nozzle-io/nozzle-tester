@@ -1,6 +1,6 @@
 # nozzle-tester evidence schema
 
-CLI output remains version `0.1.0`. GUI output uses the distinct `0.2.0`
+CLI roles other than receiver use version `0.1.0`. GUI output uses the distinct `0.2.0`
 contract below; do not feed it to the CLI self-test acceptance checker.
 
 Top-level fields:
@@ -46,6 +46,16 @@ Top-level fields:
 A missing field must not be silently interpreted as PASS. If a backend cannot expose native format, synchronization, or transfer path, the evidence must say `unknown` or mark the row `INCONCLUSIVE`.
 
 Preview artifacts are for humans only and must not replace raw evidence.
+
+## CLI receiver 0.3.0
+
+See the [receiver migration in the README](../README.md) for frame selection,
+index progression and run verdicts. The count includes each call to the pixel
+oracle, including a failed evaluation. If dimensions, format or buffer size
+preclude comparing pixels, pixel checks and their counters are null. Index
+zero has no previous-index comparison. Native format and a dedicated stride
+check are unmeasured. Requested dimensions and format remain available when
+no observation could be evaluated.
 
 ## GUI 0.2.0
 
@@ -100,8 +110,7 @@ pretend generated pixels are received evidence:
   capture are not evidence of a newer observation; use the newly written JSON
   manifest and capture status. No atomic multi-file transaction is promised.
 
-The GUI serializer is separate; the CLI serializer, its `0.1.0` consumer and
-its existing aggregation semantics are unchanged (#234 is separate). No reserved
+The GUI serializer is separate from the CLI receiver and the CLI self-test validator. No reserved
 mapped-storage domain or generalized session framework is introduced.
 
 `nozzle_tester_gui_evidence` tests production helpers with CPU fixtures and real

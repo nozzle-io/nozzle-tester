@@ -138,6 +138,12 @@ if(NOZZLE_TESTER_BUILD_TESTS)
             --cases $<TARGET_FILE:nozzle_tester_gui_evidence_cases>)
     set_tests_properties(nozzle_tester_gui_evidence PROPERTIES TIMEOUT 30)
     if(APPLE)
+        add_executable(nozzle_tester_receiver_evidence_publisher tests/receiver_evidence_publisher.cpp)
+        target_link_libraries(nozzle_tester_receiver_evidence_publisher PRIVATE nozzle_tester_core nozzle)
+        add_test(NAME nozzle_tester_cli_receiver_evidence
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/receiver_evidence.py
+                $<TARGET_FILE:nozzle-tester-cli> $<TARGET_FILE:nozzle_tester_receiver_evidence_publisher>)
+        set_tests_properties(nozzle_tester_cli_receiver_evidence PROPERTIES TIMEOUT 45)
         add_executable(nozzle_tester_gui_pixel_peer tests/gui_pixel_peer.cpp)
         target_link_libraries(nozzle_tester_gui_pixel_peer PRIVATE nozzle_tester_core nozzle)
         add_test(NAME nozzle_tester_gui_pixel_peer COMMAND nozzle_tester_gui_pixel_peer)

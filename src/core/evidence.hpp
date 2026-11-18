@@ -12,6 +12,8 @@ struct evidence_artifact {
     std::string path;
 };
 
+enum class index_progression { insufficient, repeated, advanced, nonmonotonic };
+
 struct evidence_record {
     std::string role{"verify"};
     std::string backend{"cpu"};
@@ -31,6 +33,9 @@ struct evidence_record {
     std::vector<evidence_artifact> artifacts;
     std::vector<std::string> covered_failure_reasons;
     verify_result verification;
+    index_progression progression{index_progression::insufficient};
+    std::string transport_error;
+    void observe_index(uint64_t index);
 };
 
 std::string json_escape(const std::string &text);
