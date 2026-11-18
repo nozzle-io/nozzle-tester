@@ -147,6 +147,23 @@ int main() {
             running && released == 0 && receive_calls == (mode == 3 ? 1 : 0) && published == 3);
     }
 
+    clear_gui_observation(sequence);
+    for(uint64_t index : {7u, 7u, 10u}) {
+        test.frame_index = index;
+        receive(sequence, generate_pattern(test), test);
+        emit(index == 10 ? "mixed_indices" : "repeat_or_first", sequence);
+    }
+    stop_gui_runtime(sequence, running, [] {});
+    test.frame_index = 9;
+    receive(sequence, generate_pattern(test), test);
+    emit("fresh_session", sequence);
+    test.frame_index = 12;
+    auto stale = test;
+    --stale.frame_index;
+    receive(sequence, generate_pattern(stale), test);
+    capture = capture_gui_evidence(sequence, "stale-advanced");
+    emit("advanced_bad_pixels", sequence, capture.success);
+    test.frame_index = 7;
     auto mismatch = test;
     mismatch.width += 1;
     receive(sequence, image, mismatch);
