@@ -3,6 +3,7 @@ import json
 import subprocess
 import sys
 import time
+import traceback
 import uuid
 
 cli, publisher = sys.argv[1:]
@@ -12,7 +13,7 @@ def run(case, frames):
     name = "ev234-" + uuid.uuid4().hex[:12]
     with subprocess.Popen([publisher, name, case], stdin=subprocess.PIPE,
                           stdout=subprocess.PIPE, text=True) as peer:
-        assert peer.stdout.readline().strip() == "ready"
+        assert peer.stdout.readline().strip() == "ready", "publisher exited before first commit"
         with subprocess.Popen([cli, "receiver", "--name", name, "--width", "65",
                                "--height", "33", "--format", "rgba8_unorm",
                                "--frames", str(frames), "--timeout-ms", "1000"],
@@ -54,6 +55,7 @@ for case, frames in (("correct", 1), ("wrong", 2), ("partial", 2), ("advanced", 
     try:
         run(case, frames)
     except (AssertionError, KeyError, ValueError) as error:
+        traceback.print_exc()
         failed.append(case)
         print("failed", case, repr(error), flush=True)
 if failed:
