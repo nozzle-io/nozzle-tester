@@ -1,6 +1,8 @@
 #include "core/evidence.hpp"
 #include "gui/evidence.hpp"
+#include "gui/controls.hpp"
 #include "gui/runtime_tick.hpp"
+#include "gui/receive_session.hpp"
 #include "core/pattern.hpp"
 #include "gui/pattern_publish.hpp"
 #include "core/received_image.hpp"
@@ -25,14 +27,7 @@
 
 namespace {
 
-struct gui_state {
-    int mode_index{0};
-    char channel_name[128]{"nozzle_tester_gui"};
-    int width{320};
-    int height{240};
-    int frame_index{0};
-    int format_index{0};
-    int timeout_ms{1};
+struct gui_state : nozzle_tester::gui_settings {
     bool running{false};
     std::string runtime_channel;
     bool runtime_loopback{false};
@@ -59,13 +54,6 @@ const nozzle_tester::tester_format formats[] = {
     nozzle_tester::tester_format::bgra8_unorm,
     nozzle_tester::tester_format::rgba16_float,
     nozzle_tester::tester_format::rgba32_float,
-};
-
-const char *mode_names[] = {
-    "pattern preview",
-    "sender",
-    "receiver",
-    "loopback",
 };
 
 const char *mode_role_names[] = {
@@ -228,7 +216,6 @@ nozzle_tester::gui_publish_status publish_one_frame(gui_state &state) {
     const std::vector<uint8_t> preview = nozzle_tester::image_to_rgba8_preview(image);
     upload_preview_texture(state, image.width, image.height, preview);
     state.published_count += 1;
-    state.frame_index = (int)test.frame_index;
     nozzle_tester::record_gui_generated(state.evidence, test, state.runtime_channel,
         state.runtime_loopback ? "loopback-sender" : "sender", state.published_count);
     return gui_publish_status::published;
@@ -241,6 +228,7 @@ bool receive_one_frame(gui_state &state) {
     NozzleFrame *frame = nullptr;
     NozzleErrorCode error = nozzle_receiver_acquire_frame(state.receiver, &acquire_desc, &frame);
     if(error != NOZZLE_OK || frame == nullptr) {
+        nozzle_tester::note_gui_acquire_error(state.evidence, error);
         state.last_error = error_text("missing_frame", error);
         return false;
     }
@@ -281,7 +269,6 @@ bool receive_one_frame(gui_state &state) {
 
     state.observed_count += 1;
     state.dropped_count = info.dropped_frame_count;
-    state.frame_index = (int)info.frame_index;
     nozzle_tester::evidence_record record{};
     record.role = state.runtime_loopback ? "loopback-receiver" : "receiver";
     record.backend = "auto";
@@ -289,7 +276,6 @@ bool receive_one_frame(gui_state &state) {
     record.observed_width = info.width;
     record.observed_height = info.height;
     record.observed_frame_index = info.frame_index;
-    record.observed_frame_count = state.observed_count;
     record.verification = verify;
     if(record.verification.result == nozzle_tester::verdict::pass) {
         state.last_error.clear();
@@ -362,15 +348,7 @@ int main() {
         ImGui::NewFrame();
 
         ImGui::Begin("nozzle-tester conformance");
-        bool changed = false;
-        changed = ImGui::Combo("mode", &state.mode_index, mode_names, 4) || changed;
-        changed = ImGui::InputText("channel", state.channel_name, sizeof(state.channel_name)) || changed;
-        changed = ImGui::InputInt("width", &state.width) || changed;
-        changed = ImGui::InputInt("height", &state.height) || changed;
-        changed = ImGui::InputInt("expected/frame", &state.frame_index) || changed;
-        changed = ImGui::InputInt("timeout ms", &state.timeout_ms) || changed;
-        const char *format_names[] = {"rgba8_unorm", "bgra8_unorm", "rgba16_float", "rgba32_float"};
-        changed = ImGui::Combo("format", &state.format_index, format_names, 4) || changed;
+        const bool changed = nozzle_tester::draw_session_inputs(state, state.running);
         if(changed && !state.running) {
             if(state.width < 1) state.width = 1;
             if(state.height < 1) state.height = 1;
@@ -392,21 +370,16 @@ int main() {
             state.status_text = "runtime stopped";
         }
         ImGui::SameLine();
-        if(ImGui::Button("Regenerate / verify")) {
-            update_pattern_preview(state);
-        }
-        ImGui::SameLine();
-        if(ImGui::Button("Next frame")) {
-            state.frame_index += 1;
-            update_pattern_preview(state);
-        }
+        const auto preview_action = nozzle_tester::draw_preview_actions(state.running);
+        if(preview_action == nozzle_tester::preview_action::next) ++state.frame_index;
+        if(preview_action != nozzle_tester::preview_action::none) update_pattern_preview(state);
         ImGui::SameLine();
         if(ImGui::Button("Capture evidence")) {
             capture_evidence(state);
         }
 
         ImGui::Text("verdict: %s", state.evidence.verdict_text.c_str());
-        ImGui::Text("published: %llu observed: %llu dropped: %llu fps: %.2f", (unsigned long long)state.published_count, (unsigned long long)state.observed_count, (unsigned long long)state.dropped_count, state.fps);
+        ImGui::Text("published: %llu observed since Start: %llu dropped: %llu fps: %.2f", (unsigned long long)state.published_count, (unsigned long long)state.observed_count, (unsigned long long)state.dropped_count, state.fps);
         ImGui::Text("status: %s", state.status_text.c_str());
         if(!state.last_error.empty()) {
             ImGui::Text("last error: %s", state.last_error.c_str());

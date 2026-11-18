@@ -1,6 +1,6 @@
 # nozzle-tester evidence schema
 
-CLI roles other than receiver use version `0.1.0`. GUI output uses the distinct `0.2.0`
+CLI roles other than receiver use version `0.1.0`. GUI output uses the distinct `0.4.0`
 contract below; do not feed it to the CLI self-test acceptance checker.
 
 Top-level fields:
@@ -57,7 +57,7 @@ zero has no previous-index comparison. Native format and a dedicated stride
 check are unmeasured. Requested dimensions and format remain available when
 no observation could be evaluated.
 
-## GUI 0.2.0
+## GUI 0.4.0
 
 The GUI retains identity/build fields, expected configuration, dimensions, frame,
 checks, verdict, failure reasons and artifact lists. It deliberately does not
@@ -96,10 +96,18 @@ pretend generated pixels are received evidence:
   reason, dimension/format checks retain their measured results, but orientation,
   channel order, alpha, stale-frame and stride checks are INCONCLUSIVE and
   mismatch_count is null. This does not alter the shared CLI verifier contract.
-- `changed_across_observations` is null and `temporal_progress_reason` is
-  `not_measured`. `stale_frame` is the existing single-image pattern comparison
-  against the previous index, not proof of temporal progress. No count-based
-  freshness claim is made; content progression/control lifecycle remain #231.
+- Replace the GUI 0.2.0 `changed_across_observations` and `temporal_progress_reason`
+  with `frame.index_progression`. The CLI receiver and GUI use the same index
+  accumulator: zero or one observation gives `insufficient`, equal indices give
+  `repeated`, strictly increasing indices (gaps allowed) give `advanced`,
+  and mixed repeats/increases or a decrease give `nonmonotonic`. A pixel
+  failure is still an evaluated observation; the frozen verdict and reasons
+  describe its pixels independently of the index sequence.
+- An acquisition returning `NOZZLE_ERROR_SENDER_CLOSED` ends the sequence.
+  The frozen snapshot retains its original count and progression until another
+  image is evaluated or the user explicitly stops/restarts. A timeout adds no
+  sample and does not reset the sequence. The on-screen total and FPS cover
+  the whole runtime since Start; JSON counts evaluated frames per connection.
 - `capture_errors` lists failed writes. Only successfully written binary files
   enter artifacts/artifact_paths. Capture returns failure and the UI status
   reports a write error on any failed binary or JSON write. A JSON write failure

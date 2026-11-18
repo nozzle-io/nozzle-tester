@@ -57,16 +57,6 @@ std::string json_string(const std::string &text) {
     return "\"" + json_escape(text) + "\"";
 }
 
-const char *progression_text(index_progression progression) {
-    switch(progression) {
-        case index_progression::insufficient: return "insufficient";
-        case index_progression::repeated: return "repeated";
-        case index_progression::advanced: return "advanced";
-        case index_progression::nonmonotonic: return "nonmonotonic";
-    }
-    return "insufficient";
-}
-
 const char *check_json(bool measured, bool passed) {
     if(!measured) return "null";
     return passed ? "\"PASS\"" : "\"FAIL\"";
@@ -99,7 +89,17 @@ void append_artifacts(std::ostringstream &stream, const std::vector<evidence_art
 
 } // namespace
 
-void evidence_record::observe_index(uint64_t index) {
+const char *progression_text(index_progression progression) {
+    switch(progression) {
+        case index_progression::insufficient: return "insufficient";
+        case index_progression::repeated: return "repeated";
+        case index_progression::advanced: return "advanced";
+        case index_progression::nonmonotonic: return "nonmonotonic";
+    }
+    return "insufficient";
+}
+
+void frame_sequence::observe_index(uint64_t index) {
     if(observed_frame_count != 0) {
         const auto step = index == observed_frame_index ? index_progression::repeated :
             index > observed_frame_index ? index_progression::advanced : index_progression::nonmonotonic;

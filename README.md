@@ -110,12 +110,20 @@ The GUI provides:
 - live preview, frame counters, FPS estimate, dropped-frame counter, and backend/path evidence fields;
 - `Capture evidence`, which saves the frozen receive-time record as `nozzle-tester-gui-evidence.json`. When a received snapshot exists, it also writes its unchanged raw bytes to `nozzle-tester-gui-capture.raw` and derives `nozzle-tester-gui-preview.rgba` from those same bytes. Without a snapshot it writes JSON only, with receiver checks marked INCONCLUSIVE. Generated previews and successful sends are not receiver verification.
 
-GUI output uses schema `0.2.0`. User Stop/restart clears
+Start locks the mode, channel, size, format, expected/frame and timeout settings.
+Stop to edit them. Capture remains available while running; manual preview
+regeneration and Next frame become available again when the runtime stops.
+
+GUI evidence uses schema `0.4.0`. Read `frame.index_progression` for the
+sequence of evaluated indices from this receiver connection. A gap can still
+be `advanced` even if the new image fails its separate pixel check. After a
+sender-closed acquisition the last frame stays capturable; the next evaluated
+frame starts at count 1 and `insufficient`. User Stop/restart clears
 the received snapshot; automatic failure teardown retains it for diagnosis.
 Capture includes the latest publication result even when retaining an older
 received frame. A failed artifact or JSON write is reported in capture
 status, and failed artifacts are not listed as written. See
-[the schema](docs/evidence-schema.md#gui-020) for provenance and partial-write limits.
+[the schema](docs/evidence-schema.md#gui-040) for provenance and partial-write limits.
 
 The GUI is intentionally functional rather than polished. It must not be used as a screenshot-only oracle: report the exported JSON, raw captured payload, and optional preview artifact.
 
