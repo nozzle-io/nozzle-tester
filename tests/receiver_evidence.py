@@ -56,5 +56,16 @@ for case, frames in (("correct", 1), ("wrong", 2), ("partial", 2), ("advanced", 
     except (AssertionError, KeyError, ValueError) as error:
         failed.append(case)
         print("failed", case, repr(error), flush=True)
+missing = subprocess.run([cli, "receiver", "--name", "missing-" + uuid.uuid4().hex[:12],
+                          "--frames", "1", "--timeout-ms", "100"],
+                         capture_output=True, text=True, timeout=6)
+empty = json.loads(missing.stdout)
+assert missing.returncode == 1 and empty["verdict"] == "FAIL" and empty["transport_error"]
+assert empty["failure_reasons"] == [empty["transport_error"]]
+assert empty["frame_verdict"] is None and empty["test_case_id"] is None
+assert empty["frame"] == {"expected_index": None, "observed_index": None,
+                          "observed_count": 0, "index_progression": "insufficient"}
+assert empty["mismatch_count"] is None and all(value is None for value in empty["checks"].values())
+print("zero observations", missing.returncode, missing.stdout, flush=True)
 if failed:
     sys.exit("receiver evidence failures: " + ", ".join(failed))

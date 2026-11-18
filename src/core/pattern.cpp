@@ -358,6 +358,7 @@ verify_result verify_pattern(const image_buffer &observed, const test_case &expe
     }
 
     const uint64_t pixel_count = (uint64_t)observed.width * observed.height;
+    result.pixels_compared = true;
     result.mismatch_count = count_mismatches(observed, expected, false, false, true);
     result.flipped_mismatch_count = count_mismatches(observed, expected, true, false, true);
     result.rb_swapped_mismatch_count = count_mismatches(observed, expected, false, true, true);

@@ -75,6 +75,20 @@ Receive and verify frames:
 build/nozzle-tester-cli receiver --name nozzle_tester --frames 10 --expected-width 320 --expected-height 240 --format rgba8_unorm --evidence build/receiver.json
 ```
 
+Receiver JSON uses schema `0.3.0`. Read `frame.index_progression` in place of
+the 0.1.0 boolean `changed_across_observations`. Fewer than two evaluated
+frames gives `insufficient`; identical indices give `repeated`; strictly
+increasing indices give `advanced` (gaps allowed); all other sequences give
+`nonmonotonic`. This describes metadata indices. `checks.stale_frame` compares
+the selected image with the expected and previous-index patterns.
+
+On success the record describes the last evaluated frame. The receiver stops
+at the first failure. `frame_verdict` and the comparison counters describe the
+selected frame. `verdict`, `failure_reasons` and the process exit code describe
+the entire receive request. A transport failure sets `transport_error` and
+exits 1, retaining any preceding evaluated frame. Unmeasured values are null.
+Other CLI roles continue to emit 0.1.0.
+
 ## GUI
 
 Run:
@@ -96,7 +110,7 @@ The GUI provides:
 - live preview, frame counters, FPS estimate, dropped-frame counter, and backend/path evidence fields;
 - `Capture evidence`, which saves the frozen receive-time record as `nozzle-tester-gui-evidence.json`. When a received snapshot exists, it also writes its unchanged raw bytes to `nozzle-tester-gui-capture.raw` and derives `nozzle-tester-gui-preview.rgba` from those same bytes. Without a snapshot it writes JSON only, with receiver checks marked INCONCLUSIVE. Generated previews and successful sends are not receiver verification.
 
-GUI output uses schema `0.2.0`; CLI output remains `0.1.0`. User Stop/restart clears
+GUI output uses schema `0.2.0`. User Stop/restart clears
 the received snapshot; automatic failure teardown retains it for diagnosis.
 Capture includes the latest publication result even when retaining an older
 received frame. A failed artifact or JSON write is reported in capture
